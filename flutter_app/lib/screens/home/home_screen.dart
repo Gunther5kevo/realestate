@@ -268,7 +268,26 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                   : 'Search properties for sale...',
             ),
           ),
-          const SizedBox(width: 12),
+          const SizedBox(width: 8),
+          // Map button
+          GestureDetector(
+            onTap: () => context.push('/map'),
+            child: Container(
+              width: 48,
+              height: 48,
+              decoration: BoxDecoration(
+                color: AppTheme.surfaceVariant,
+                borderRadius: BorderRadius.circular(AppTheme.radiusMD),
+                border: Border.all(color: AppTheme.border, width: 0.5),
+              ),
+              child: const Icon(
+                Icons.map_outlined,
+                color: AppTheme.textSecondary,
+                size: 20,
+              ),
+            ),
+          ),
+          const SizedBox(width: 8),
           _FilterButton(
             hasActiveFilters: filter.hasActiveFilters,
             onTap: () => _showFilterSheet(filter),

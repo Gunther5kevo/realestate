@@ -63,34 +63,29 @@ final agentPropertiesProvider = FutureProvider.family<List<Property>, String>(
 
 // ─── Map Providers ────────────────────────────────────────────────────────────
 
-/// Holds the current visible map bounds + optional filters set by MapSearchScreen.
-/// Shape: { swLat, swLng, neLat, neLng, listingType?, propertyType? }
-final mapBoundsProvider = StateProvider<Map<String, dynamic>?>((ref) => null);
+/// Holds the map filter selections (listing type + property type).
+/// Separated from bounds so filter changes trigger a re-fetch independently.
+final mapFilterProvider = StateProvider<MapFilter>(
+  (ref) => const MapFilter(),
+);
 
-/// Fetches properties within the current map bounds.
-/// Re-runs automatically whenever mapBoundsProvider changes.
+/// Holds the current visible map bounds set by MapSearchScreen.
+final mapBoundsProvider = StateProvider<MapBounds?>((ref) => null);
+
+/// Fetches properties within the current map bounds + active filters.
+/// Re-runs automatically whenever bounds or filters change.
 final mapPropertiesProvider = FutureProvider<List<Property>>((ref) async {
   final bounds = ref.watch(mapBoundsProvider);
+  final filter = ref.watch(mapFilterProvider);
   if (bounds == null) return [];
 
-  final listingTypeStr = bounds['listingType'] as String?;
-  final propertyTypeStr = bounds['propertyType'] as String?;
-
-  final listingType = listingTypeStr != null
-      ? ListingType.values.firstWhere((e) => e.name == listingTypeStr)
-      : null;
-
-  final propertyType = propertyTypeStr != null
-      ? PropertyType.values.firstWhere((e) => e.name == propertyTypeStr)
-      : null;
-
   return ref.read(propertyServiceProvider).getPropertiesInBounds(
-        swLat: (bounds['swLat'] as num).toDouble(),
-        swLng: (bounds['swLng'] as num).toDouble(),
-        neLat: (bounds['neLat'] as num).toDouble(),
-        neLng: (bounds['neLng'] as num).toDouble(),
-        listingType: listingType,
-        type: propertyType,
+        swLat: bounds.swLat,
+        swLng: bounds.swLng,
+        neLat: bounds.neLat,
+        neLng: bounds.neLng,
+        listingType: filter.listingType,
+        type: filter.propertyType,
       );
 });
 

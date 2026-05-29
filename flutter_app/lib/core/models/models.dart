@@ -1,4 +1,5 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:flutter/foundation.dart';
 
 // ─── User Model ──────────────────────────────────────────────────────────────
 enum UserRole { user, agent, admin }
@@ -46,8 +47,7 @@ class AppUser {
       ),
       isVerified: data['isVerified'] ?? false,
       isActive: data['isActive'] ?? true,
-      savedProperties:
-          List<String>.from(data['savedProperties'] ?? []),
+      savedProperties: List<String>.from(data['savedProperties'] ?? []),
       agentProfile: data['agentProfile'],
       createdAt: (data['createdAt'] as Timestamp).toDate(),
       updatedAt: (data['updatedAt'] as Timestamp).toDate(),
@@ -171,7 +171,7 @@ class Property {
   final List<PropertyAmenity> amenities;
   final String agentId;
   final String? agentName;
-  final String? agentPhone;        // ← NEW
+  final String? agentPhone;
   final bool isFeatured;
   final bool isApproved;
   final int viewCount;
@@ -201,7 +201,7 @@ class Property {
     this.amenities = const [],
     required this.agentId,
     this.agentName,
-    this.agentPhone,               // ← NEW
+    this.agentPhone,
     this.isFeatured = false,
     this.isApproved = false,
     this.viewCount = 0,
@@ -232,8 +232,7 @@ class Property {
         (l) => l.name == data['listingType'],
         orElse: () => ListingType.sale,
       ),
-      location:
-          PropertyLocation.fromMap(data['location'] ?? {}),
+      location: PropertyLocation.fromMap(data['location'] ?? {}),
       bedrooms: data['bedrooms'],
       bathrooms: data['bathrooms'],
       areaSqFt: data['areaSqFt']?.toDouble(),
@@ -249,7 +248,7 @@ class Property {
           .toList(),
       agentId: data['agentId'] ?? '',
       agentName: data['agentName'],
-      agentPhone: data['agentPhone'],   // ← NEW
+      agentPhone: data['agentPhone'],
       isFeatured: data['isFeatured'] ?? false,
       isApproved: data['isApproved'] ?? false,
       viewCount: data['viewCount'] ?? 0,
@@ -280,7 +279,7 @@ class Property {
         'amenities': amenities.map((a) => a.name).toList(),
         'agentId': agentId,
         'agentName': agentName,
-        'agentPhone': agentPhone,         // ← NEW
+        'agentPhone': agentPhone,
         'isFeatured': isFeatured,
         'isApproved': isApproved,
         'viewCount': viewCount,
@@ -316,12 +315,10 @@ class Property {
     keywords.add(location.city.toLowerCase());
     keywords.add(location.state.toLowerCase());
     if (location.neighborhood != null) {
-      keywords
-          .addAll(location.neighborhood!.toLowerCase().split(' '));
+      keywords.addAll(location.neighborhood!.toLowerCase().split(' '));
     }
     if (location.address.isNotEmpty) {
-      keywords
-          .addAll(location.address.toLowerCase().split(' '));
+      keywords.addAll(location.address.toLowerCase().split(' '));
     }
     keywords.add(type.name.toLowerCase());
     keywords.add(listingType.name.toLowerCase());
@@ -345,10 +342,7 @@ class Property {
     return keywords.toList();
   }
 
-  // ─── Computed getters ─────────────────────────────────────────────────────
-
-  String? get videoUrl =>
-      videoUrls.isNotEmpty ? videoUrls.first : null;
+  String? get videoUrl => videoUrls.isNotEmpty ? videoUrls.first : null;
 
   String get formattedPrice {
     if (price >= 1000000) {
@@ -359,9 +353,8 @@ class Property {
     return '$currency ${price.toStringAsFixed(0)}';
   }
 
-  String get priceLabel => listingType == ListingType.rent
-      ? '$formattedPrice/mo'
-      : formattedPrice;
+  String get priceLabel =>
+      listingType == ListingType.rent ? '$formattedPrice/mo' : formattedPrice;
 }
 
 // ─── Booking Model ───────────────────────────────────────────────────────────
@@ -426,8 +419,7 @@ class Booking {
         (s) => s.name == data['status'],
         orElse: () => BookingStatus.pending,
       ),
-      scheduledDate:
-          (data['scheduledDate'] as Timestamp).toDate(),
+      scheduledDate: (data['scheduledDate'] as Timestamp).toDate(),
       timeSlot: data['timeSlot'],
       notes: data['notes'],
       cancellationReason: data['cancellationReason'],
@@ -481,10 +473,8 @@ class Booking {
         scheduledDate: scheduledDate,
         timeSlot: timeSlot,
         notes: notes,
-        cancellationReason:
-            cancellationReason ?? this.cancellationReason,
-        paymentReference:
-            paymentReference ?? this.paymentReference,
+        cancellationReason: cancellationReason ?? this.cancellationReason,
+        paymentReference: paymentReference ?? this.paymentReference,
         paymentStatus: paymentStatus ?? this.paymentStatus,
         createdAt: createdAt,
         updatedAt: DateTime.now(),
@@ -492,9 +482,7 @@ class Booking {
 }
 
 // ─── Transaction Model ───────────────────────────────────────────────────────
-enum TransactionStatus {
-  pending, processing, completed, failed, refunded
-}
+enum TransactionStatus { pending, processing, completed, failed, refunded }
 enum PaymentMethod { mpesa, stripe, card }
 
 class Transaction {
@@ -721,8 +709,7 @@ class AgentProfile {
         totalListings: map['totalListings'] ?? 0,
         soldCount: map['soldCount'] ?? 0,
         isVerified: map['isVerified'] ?? false,
-        specializations:
-            List<String>.from(map['specializations'] ?? []),
+        specializations: List<String>.from(map['specializations'] ?? []),
         socialLinks: map['socialLinks'] != null
             ? Map<String, String>.from(map['socialLinks'])
             : null,
@@ -730,4 +717,64 @@ class AgentProfile {
             ? (map['memberSince'] as Timestamp).toDate()
             : DateTime.now(),
       );
+}
+
+// ─── Map Models ───────────────────────────────────────────────────────────────
+
+@immutable
+class MapBounds {
+  final double swLat;
+  final double swLng;
+  final double neLat;
+  final double neLng;
+
+  const MapBounds({
+    required this.swLat,
+    required this.swLng,
+    required this.neLat,
+    required this.neLng,
+  });
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is MapBounds &&
+          swLat == other.swLat &&
+          swLng == other.swLng &&
+          neLat == other.neLat &&
+          neLng == other.neLng;
+
+  @override
+  int get hashCode => Object.hash(swLat, swLng, neLat, neLng);
+}
+
+@immutable
+class MapFilter {
+  final ListingType? listingType;
+  final PropertyType? propertyType;
+
+  const MapFilter({this.listingType, this.propertyType});
+
+  MapFilter copyWith({
+    ListingType? listingType,
+    PropertyType? propertyType,
+    bool clearListingType = false,
+    bool clearPropertyType = false,
+  }) {
+    return MapFilter(
+      listingType: clearListingType ? null : listingType ?? this.listingType,
+      propertyType:
+          clearPropertyType ? null : propertyType ?? this.propertyType,
+    );
+  }
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is MapFilter &&
+          listingType == other.listingType &&
+          propertyType == other.propertyType;
+
+  @override
+  int get hashCode => Object.hash(listingType, propertyType);
 }

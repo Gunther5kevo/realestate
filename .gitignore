@@ -22,4 +22,7 @@ desktop.ini
 *.ntvs*
 *.njsproj
 *.sln
-*.sw?
+serviceAccount.json
+**/serviceAccount.json
+*.json.key
+service-account*.json

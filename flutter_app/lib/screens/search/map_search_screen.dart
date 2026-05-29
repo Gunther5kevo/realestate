@@ -10,6 +10,7 @@ import '../../core/providers/providers.dart';
 class MapSearchScreen extends ConsumerStatefulWidget {
   final Property? initialProperty;
   const MapSearchScreen({super.key, this.initialProperty});
+
   @override
   ConsumerState<MapSearchScreen> createState() => _MapSearchScreenState();
 }
@@ -20,13 +21,8 @@ class _MapSearchScreenState extends ConsumerState<MapSearchScreen> {
   Property? _selectedProperty;
   bool _isLoadingLocation = false;
 
-  // Active filters
-  ListingType? _filterListingType;
-  PropertyType? _filterPropertyType;
-
   static const LatLng _nairobiCenter = LatLng(-1.286389, 36.817223);
 
-  // Custom marker icons (loaded once)
   BitmapDescriptor _saleIcon = BitmapDescriptor.defaultMarkerWithHue(
     BitmapDescriptor.hueAzure,
   );
@@ -38,7 +34,6 @@ class _MapSearchScreenState extends ConsumerState<MapSearchScreen> {
   void initState() {
     super.initState();
     _loadMarkerIcons();
-    // If opened from a property detail, zoom straight to it
     if (widget.initialProperty != null) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
         setState(() => _selectedProperty = widget.initialProperty);
@@ -47,22 +42,21 @@ class _MapSearchScreenState extends ConsumerState<MapSearchScreen> {
   }
 
   Future<void> _loadMarkerIcons() async {
-    // Swap for custom PNGs later if needed:
-    // _saleIcon = await BitmapDescriptor.fromAssetImage(...);
     _saleIcon = BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueAzure);
     _rentIcon = BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueGreen);
   }
 
-  // Called every time the camera finishes moving
+  // Called every time the camera finishes moving — updates bounds only,
+  // filters are handled separately via mapFilterProvider
   Future<void> _onCameraIdle() async {
     if (_mapController == null) return;
     final bounds = await _mapController!.getVisibleRegion();
-    ref.read(mapBoundsProvider.notifier).state = {
-      'swLat': bounds.southwest.latitude,
-      'swLng': bounds.southwest.longitude,
-      'neLat': bounds.northeast.latitude,
-      'neLng': bounds.northeast.longitude,
-    };
+    ref.read(mapBoundsProvider.notifier).state = MapBounds(
+      swLat: bounds.southwest.latitude,
+      swLng: bounds.southwest.longitude,
+      neLat: bounds.northeast.latitude,
+      neLng: bounds.northeast.longitude,
+    );
   }
 
   void _rebuildMarkers(List<Property> properties) {
@@ -86,9 +80,29 @@ class _MapSearchScreenState extends ConsumerState<MapSearchScreen> {
     });
   }
 
+  void _setListingFilter(ListingType? type) {
+    final current = ref.read(mapFilterProvider);
+    ref.read(mapFilterProvider.notifier).state = current.copyWith(
+      clearListingType: type == null,
+      listingType: type,
+    );
+  }
+
+  void _togglePropertyTypeFilter(PropertyType type) {
+    final current = ref.read(mapFilterProvider);
+    final isSame = current.propertyType == type;
+    ref.read(mapFilterProvider.notifier).state = current.copyWith(
+      clearPropertyType: isSame,
+      propertyType: isSame ? null : type,
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
-    // React to bound changes and rebuild markers
+    // Watch the current filter state to drive chip selection UI
+    final activeFilter = ref.watch(mapFilterProvider);
+
+    // React to bound/filter changes and rebuild markers
     ref.listen<AsyncValue<List<Property>>>(mapPropertiesProvider, (_, next) {
       next.whenData(_rebuildMarkers);
     });
@@ -109,7 +123,6 @@ class _MapSearchScreenState extends ConsumerState<MapSearchScreen> {
             ),
             onMapCreated: (controller) {
               _mapController = controller;
-              // Trigger first load
               _onCameraIdle();
             },
             onCameraIdle: _onCameraIdle,
@@ -123,8 +136,10 @@ class _MapSearchScreenState extends ConsumerState<MapSearchScreen> {
             ),
           ),
 
-          // ── Loading overlay (while fetching markers) ──────────────────
-          _MapLoadingOverlay(isLoading: ref.watch(mapPropertiesProvider).isLoading),
+          // ── Loading indicator ─────────────────────────────────────────
+          _MapLoadingOverlay(
+            isLoading: ref.watch(mapPropertiesProvider).isLoading,
+          ),
 
           // ── Top bar ───────────────────────────────────────────────────
           SafeArea(
@@ -144,28 +159,24 @@ class _MapSearchScreenState extends ConsumerState<MapSearchScreen> {
                           onTap: () => context.push('/search'),
                           child: Container(
                             height: 44,
-                            padding: const EdgeInsets.symmetric(
-                                horizontal: 16),
+                            padding: const EdgeInsets.symmetric(horizontal: 16),
                             decoration: BoxDecoration(
                               color: AppTheme.surface,
-                              borderRadius: BorderRadius.circular(
-                                  AppTheme.radiusFull),
+                              borderRadius:
+                                  BorderRadius.circular(AppTheme.radiusFull),
                               boxShadow: AppTheme.shadowMD,
                             ),
                             child: Row(
                               children: [
                                 const Icon(Icons.search,
-                                    size: 18,
-                                    color: AppTheme.textSecondary),
+                                    size: 18, color: AppTheme.textSecondary),
                                 const SizedBox(width: 8),
                                 Text(
                                   'Search this area',
                                   style: Theme.of(context)
                                       .textTheme
                                       .bodyMedium
-                                      ?.copyWith(
-                                          color:
-                                              AppTheme.textSecondary),
+                                      ?.copyWith(color: AppTheme.textSecondary),
                                 ),
                               ],
                             ),
@@ -183,51 +194,33 @@ class _MapSearchScreenState extends ConsumerState<MapSearchScreen> {
                   padding: const EdgeInsets.symmetric(horizontal: 16),
                   child: Row(
                     children: [
+                      // Listing type filters
                       _FilterChip(
                         label: 'All',
-                        isSelected: _filterListingType == null,
-                        onTap: () {
-                          setState(() => _filterListingType = null);
-                          _onCameraIdle();
-                        },
+                        isSelected: activeFilter.listingType == null,
+                        onTap: () => _setListingFilter(null),
                       ),
                       const SizedBox(width: 8),
                       _FilterChip(
                         label: 'For Sale',
-                        isSelected:
-                            _filterListingType == ListingType.sale,
-                        onTap: () {
-                          setState(() =>
-                              _filterListingType = ListingType.sale);
-                          _onCameraIdle();
-                        },
+                        isSelected: activeFilter.listingType == ListingType.sale,
+                        onTap: () => _setListingFilter(ListingType.sale),
                       ),
                       const SizedBox(width: 8),
                       _FilterChip(
                         label: 'For Rent',
-                        isSelected:
-                            _filterListingType == ListingType.rent,
-                        onTap: () {
-                          setState(() =>
-                              _filterListingType = ListingType.rent);
-                          _onCameraIdle();
-                        },
+                        isSelected: activeFilter.listingType == ListingType.rent,
+                        onTap: () => _setListingFilter(ListingType.rent),
                       ),
                       const SizedBox(width: 8),
+
+                      // Property type filters
                       ...PropertyType.values.map((t) => Padding(
                             padding: const EdgeInsets.only(right: 8),
                             child: _FilterChip(
-                              label: t.name[0].toUpperCase() +
-                                  t.name.substring(1),
-                              isSelected: _filterPropertyType == t,
-                              onTap: () {
-                                setState(() =>
-                                    _filterPropertyType =
-                                        _filterPropertyType == t
-                                            ? null
-                                            : t);
-                                _onCameraIdle();
-                              },
+                              label: t.name[0].toUpperCase() + t.name.substring(1),
+                              isSelected: activeFilter.propertyType == t,
+                              onTap: () => _togglePropertyTypeFilter(t),
                             ),
                           )),
                     ],
@@ -254,22 +247,19 @@ class _MapSearchScreenState extends ConsumerState<MapSearchScreen> {
             left: 16,
             bottom: _selectedProperty != null ? 240 : 24,
             child: Container(
-              padding: const EdgeInsets.symmetric(
-                  horizontal: 12, vertical: 8),
+              padding:
+                  const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
               decoration: BoxDecoration(
                 color: AppTheme.surface,
-                borderRadius:
-                    BorderRadius.circular(AppTheme.radiusMD),
+                borderRadius: BorderRadius.circular(AppTheme.radiusMD),
                 boxShadow: AppTheme.shadowSM,
               ),
               child: Row(
                 children: [
                   _LegendItem(
-                      color: const Color(0xFF4285F4),
-                      label: 'For Sale'),
+                      color: const Color(0xFF4285F4), label: 'For Sale'),
                   const SizedBox(width: 12),
-                  _LegendItem(
-                      color: AppTheme.accent, label: 'For Rent'),
+                  _LegendItem(color: AppTheme.accent, label: 'For Rent'),
                 ],
               ),
             ),
@@ -319,6 +309,7 @@ class _MapSearchScreenState extends ConsumerState<MapSearchScreen> {
             ),
           ),
           const SizedBox(width: 14),
+
           // Details
           Expanded(
             child: Column(
@@ -335,16 +326,13 @@ class _MapSearchScreenState extends ConsumerState<MapSearchScreen> {
                 Row(
                   children: [
                     const Icon(Icons.location_on_outlined,
-                        size: 12,
-                        color: AppTheme.textSecondary),
+                        size: 12, color: AppTheme.textSecondary),
                     const SizedBox(width: 2),
                     Expanded(
                       child: Text(
                         property.location.neighborhood ??
                             property.location.city,
-                        style: Theme.of(context)
-                            .textTheme
-                            .bodySmall,
+                        style: Theme.of(context).textTheme.bodySmall,
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
                       ),
@@ -363,31 +351,23 @@ class _MapSearchScreenState extends ConsumerState<MapSearchScreen> {
                     ),
                     const SizedBox(width: 8),
                     if (property.bedrooms != null)
-                      Text(
-                        '${property.bedrooms} bd',
-                        style: Theme.of(context)
-                            .textTheme
-                            .bodySmall,
-                      ),
+                      Text('${property.bedrooms} bd',
+                          style: Theme.of(context).textTheme.bodySmall),
                     if (property.bathrooms != null) ...[
                       const SizedBox(width: 6),
-                      Text(
-                        '${property.bathrooms} ba',
-                        style: Theme.of(context)
-                            .textTheme
-                            .bodySmall,
-                      ),
+                      Text('${property.bathrooms} ba',
+                          style: Theme.of(context).textTheme.bodySmall),
                     ],
                   ],
                 ),
               ],
             ),
           ),
+
           // Navigate to detail
           IconButton(
             icon: const Icon(Icons.arrow_forward_ios, size: 18),
-            onPressed: () =>
-                context.push('/property/${property.id}'),
+            onPressed: () => context.push('/property/${property.id}'),
           ),
         ],
       ),
@@ -405,9 +385,7 @@ class _MapSearchScreenState extends ConsumerState<MapSearchScreen> {
           permission == LocationPermission.deniedForever) {
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(
-                content:
-                    Text('Location permission denied')),
+            const SnackBar(content: Text('Location permission denied')),
           );
         }
         return;
@@ -440,7 +418,6 @@ class _MapSearchScreenState extends ConsumerState<MapSearchScreen> {
 }
 
 // ─── Map Loading Overlay ──────────────────────────────────────────────────────
-
 class _MapLoadingOverlay extends StatelessWidget {
   final bool isLoading;
   const _MapLoadingOverlay({required this.isLoading});
@@ -462,7 +439,6 @@ class _MapLoadingOverlay extends StatelessWidget {
 }
 
 // ─── Circle Button ────────────────────────────────────────────────────────────
-
 class _CircleButton extends StatelessWidget {
   final IconData icon;
   final Color? color;
@@ -500,7 +476,6 @@ class _CircleButton extends StatelessWidget {
 }
 
 // ─── Filter Chip ──────────────────────────────────────────────────────────────
-
 class _FilterChip extends StatelessWidget {
   final String label;
   final bool isSelected;
@@ -518,12 +493,10 @@ class _FilterChip extends StatelessWidget {
       onTap: onTap,
       child: AnimatedContainer(
         duration: const Duration(milliseconds: 150),
-        padding:
-            const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
         decoration: BoxDecoration(
           color: isSelected ? AppTheme.primary : AppTheme.surface,
-          borderRadius:
-              BorderRadius.circular(AppTheme.radiusFull),
+          borderRadius: BorderRadius.circular(AppTheme.radiusFull),
           boxShadow: AppTheme.shadowSM,
         ),
         child: Text(
@@ -531,8 +504,7 @@ class _FilterChip extends StatelessWidget {
           style: TextStyle(
             fontSize: 12,
             fontWeight: FontWeight.w500,
-            color:
-                isSelected ? Colors.white : AppTheme.textSecondary,
+            color: isSelected ? Colors.white : AppTheme.textSecondary,
           ),
         ),
       ),
@@ -541,7 +513,6 @@ class _FilterChip extends StatelessWidget {
 }
 
 // ─── Legend Item ──────────────────────────────────────────────────────────────
-
 class _LegendItem extends StatelessWidget {
   final Color color;
   final String label;
@@ -554,12 +525,10 @@ class _LegendItem extends StatelessWidget {
         Container(
           width: 10,
           height: 10,
-          decoration: BoxDecoration(
-              color: color, shape: BoxShape.circle),
+          decoration: BoxDecoration(color: color, shape: BoxShape.circle),
         ),
         const SizedBox(width: 4),
-        Text(label,
-            style: Theme.of(context).textTheme.labelSmall),
+        Text(label, style: Theme.of(context).textTheme.labelSmall),
       ],
     );
   }
