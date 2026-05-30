@@ -130,20 +130,12 @@ class _PropertyDetailScreenState extends ConsumerState<PropertyDetailScreen>
     final hasVideo = property.videoUrl != null && property.videoUrl!.isNotEmpty;
     final showVideo = _showingVideo && hasVideo;
 
-    // The toggle pill must live in the OUTER Stack, as a sibling of the inner
-    // Stack that holds the PageView — not a child of it.
-    //
-    // Flutter hit-tests Stack children in reverse order (last child first).
-    // When the pill is inside the same Stack as the PageView, the PageView's
-    // horizontal-drag recognizer competes in the gesture arena and wins even
-    // for plain taps. Moving the pill to a parent Stack means it is evaluated
-    // before the PageView sees the pointer at all.
     return SizedBox(
       height: 320,
       child: Stack(
         fit: StackFit.expand,
         children: [
-          // ── Inner stack: media + decorative (non-interactive) overlays ──
+          // ── Inner stack: media + decorative overlays ──
           Stack(
             fit: StackFit.expand,
             children: [
@@ -178,6 +170,12 @@ class _PropertyDetailScreenState extends ConsumerState<PropertyDetailScreen>
                         ),
                       ),
               ),
+
+              // ── Sold / Rented dimming overlay ──────────────────────────
+              if (property.isUnavailable)
+                Container(
+                  color: Colors.black.withValues(alpha: 0.45),
+                ),
 
               // Page indicator — decorative only
               if (!showVideo && images.length > 1)
@@ -227,8 +225,14 @@ class _PropertyDetailScreenState extends ConsumerState<PropertyDetailScreen>
             ],
           ),
 
-          // ── Toggle pill: outer Stack child, evaluated before PageView ───
-          if (hasVideo)
+          // ── Sold / Rented diagonal stamp ──────────────────────────────
+          if (property.isUnavailable)
+            Center(
+              child: _UnavailableStamp(status: property.status),
+            ),
+
+          // ── Video / Photo toggle pill ──────────────────────────────────
+          if (hasVideo && !property.isUnavailable)
             Positioned(
               top: 16,
               left: 0,
@@ -263,6 +267,13 @@ class _PropertyDetailScreenState extends ConsumerState<PropertyDetailScreen>
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             const SizedBox(height: 8),
+
+            // ── Unavailability banner ──────────────────────────────────
+            if (property.isUnavailable) ...[
+              _UnavailabilityBanner(status: property.status),
+              const SizedBox(height: 16),
+            ],
+
             _buildHeader(property),
             const SizedBox(height: 16),
             _buildLocationRow(property),
@@ -318,8 +329,13 @@ class _PropertyDetailScreenState extends ConsumerState<PropertyDetailScreen>
             Text(
               property.priceLabel,
               style: Theme.of(context).textTheme.headlineLarge?.copyWith(
-                    color: AppTheme.primary,
+                    color: property.isUnavailable
+                        ? AppTheme.textSecondary
+                        : AppTheme.primary,
                     fontFamily: AppTheme.fontFamilyDisplay,
+                    decoration: property.isUnavailable
+                        ? TextDecoration.lineThrough
+                        : null,
                   ),
             ),
             if (property.listingType == ListingType.rent)
@@ -490,8 +506,9 @@ class _PropertyDetailScreenState extends ConsumerState<PropertyDetailScreen>
 
   Widget _buildOverviewTab(Property property) {
     final details = <String, String>{
-      if (property.type != PropertyType.land) 'Type': _formatType(property.type),
-      'Status': _formatStatus(property.status),
+      if (property.type != PropertyType.land)
+        'Type': _formatType(property.type),
+      'Status': property.status.displayLabel,
       if (property.floors != null) 'Floors': '${property.floors}',
       if (property.yearBuilt != null) 'Built in': '${property.yearBuilt}',
       'Listing': property.listingType == ListingType.rent ? 'Rental' : 'Sale',
@@ -525,12 +542,23 @@ class _PropertyDetailScreenState extends ConsumerState<PropertyDetailScreen>
           itemCount: details.length,
           itemBuilder: (context, index) {
             final entry = details.entries.toList()[index];
+            final isStatusField = entry.key == 'Status';
             return Container(
-              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+              padding: const EdgeInsets.symmetric(
+                  horizontal: 14, vertical: 10),
               decoration: BoxDecoration(
-                color: AppTheme.surface,
+                color: isStatusField && property.isUnavailable
+                    ? _unavailableColor(property.status)
+                        .withValues(alpha: 0.08)
+                    : AppTheme.surface,
                 borderRadius: BorderRadius.circular(AppTheme.radiusMD),
-                border: Border.all(color: AppTheme.border, width: 0.5),
+                border: Border.all(
+                  color: isStatusField && property.isUnavailable
+                      ? _unavailableColor(property.status)
+                          .withValues(alpha: 0.3)
+                      : AppTheme.border,
+                  width: isStatusField && property.isUnavailable ? 1 : 0.5,
+                ),
               ),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
@@ -539,8 +567,17 @@ class _PropertyDetailScreenState extends ConsumerState<PropertyDetailScreen>
                   Text(entry.key,
                       style: Theme.of(context).textTheme.labelSmall),
                   const SizedBox(height: 2),
-                  Text(entry.value,
-                      style: Theme.of(context).textTheme.titleMedium),
+                  Text(
+                    entry.value,
+                    style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                          color: isStatusField && property.isUnavailable
+                              ? _unavailableColor(property.status)
+                              : null,
+                          fontWeight: isStatusField && property.isUnavailable
+                              ? FontWeight.w700
+                              : null,
+                        ),
+                  ),
                 ],
               ),
             );
@@ -609,7 +646,8 @@ class _PropertyDetailScreenState extends ConsumerState<PropertyDetailScreen>
                   fontFamily: AppTheme.fontFamily,
                   fontSize: 11,
                   fontWeight: FontWeight.w500,
-                  color: hasAmenity ? AppTheme.primary : AppTheme.textTertiary,
+                  color:
+                      hasAmenity ? AppTheme.primary : AppTheme.textTertiary,
                 ),
                 textAlign: TextAlign.center,
               ),
@@ -708,8 +746,6 @@ class _PropertyDetailScreenState extends ConsumerState<PropertyDetailScreen>
               ],
             ),
             const SizedBox(height: 16),
-
-            // ── Contact buttons ──────────────────────────────────────────
             Row(
               children: [
                 Expanded(
@@ -754,6 +790,63 @@ class _PropertyDetailScreenState extends ConsumerState<PropertyDetailScreen>
     final currentUser = ref.watch(currentUserProvider).value;
     final isOwnListing = currentUser?.id == property.agentId;
 
+    // ── Unavailable state ──────────────────────────────────────────────────
+    if (property.isUnavailable) {
+      return Container(
+        padding: const EdgeInsets.fromLTRB(20, 12, 20, 32),
+        decoration: BoxDecoration(
+          color: AppTheme.surface,
+          border:
+              Border(top: BorderSide(color: AppTheme.border, width: 0.5)),
+        ),
+        child: Row(
+          children: [
+            Container(
+              width: 44,
+              height: 44,
+              decoration: BoxDecoration(
+                color: _unavailableColor(property.status)
+                    .withValues(alpha: 0.1),
+                shape: BoxShape.circle,
+              ),
+              child: Icon(
+                property.status == PropertyStatus.rented
+                    ? Icons.key_off_outlined
+                    : Icons.sell_outlined,
+                color: _unavailableColor(property.status),
+                size: 22,
+              ),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    property.status == PropertyStatus.rented
+                        ? 'This property has been rented'
+                        : 'This property has been sold',
+                    style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                          color: _unavailableColor(property.status),
+                          fontWeight: FontWeight.w700,
+                        ),
+                  ),
+                  Text(
+                    'It is no longer available for booking',
+                    style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                          color: AppTheme.textSecondary,
+                        ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      );
+    }
+
+    // ── Available state ────────────────────────────────────────────────────
     return Container(
       padding: const EdgeInsets.fromLTRB(20, 12, 20, 32),
       decoration: BoxDecoration(
@@ -947,8 +1040,125 @@ class _PropertyDetailScreenState extends ConsumerState<PropertyDetailScreen>
   String _formatType(PropertyType type) =>
       type.name[0].toUpperCase() + type.name.substring(1);
 
-  String _formatStatus(PropertyStatus status) =>
-      status.name[0].toUpperCase() + status.name.substring(1);
+  Color _unavailableColor(PropertyStatus status) {
+    if (status == PropertyStatus.rented) return const Color(0xFFF4511E);
+    if (status == PropertyStatus.sold) return const Color(0xFFE53935);
+    return AppTheme.textSecondary;
+  }
+}
+
+// ─── Unavailability Banner ────────────────────────────────────────────────────
+
+/// A prominent inline banner shown at the top of the detail content when a
+/// property is no longer available.
+class _UnavailabilityBanner extends StatelessWidget {
+  final PropertyStatus status;
+  const _UnavailabilityBanner({required this.status});
+
+  @override
+  Widget build(BuildContext context) {
+    final isSold = status == PropertyStatus.sold;
+    final color = isSold ? const Color(0xFFE53935) : const Color(0xFFF4511E);
+    final icon = isSold ? Icons.sell_outlined : Icons.key_off_outlined;
+    final title = isSold ? 'Property Sold' : 'Property Rented';
+    final subtitle = isSold
+        ? 'This property has been sold and is no longer available for viewing.'
+        : 'This property has been rented out and is no longer available.';
+
+    return Container(
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.08),
+        borderRadius: BorderRadius.circular(AppTheme.radiusLG),
+        border: Border.all(color: color.withValues(alpha: 0.3)),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Container(
+            width: 36,
+            height: 36,
+            decoration: BoxDecoration(
+              color: color.withValues(alpha: 0.15),
+              shape: BoxShape.circle,
+            ),
+            child: Icon(icon, color: color, size: 18),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  title,
+                  style: TextStyle(
+                    fontFamily: AppTheme.fontFamily,
+                    fontSize: 14,
+                    fontWeight: FontWeight.w700,
+                    color: color,
+                  ),
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  subtitle,
+                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                        color: AppTheme.textSecondary,
+                      ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    ).animate().fadeIn(duration: 350.ms).slideY(begin: -0.05, end: 0);
+  }
+}
+
+// ─── Unavailable Image Stamp ──────────────────────────────────────────────────
+
+/// Diagonal "SOLD" / "RENTED" stamp displayed over the hero image.
+class _UnavailableStamp extends StatelessWidget {
+  final PropertyStatus status;
+  const _UnavailableStamp({required this.status});
+
+  @override
+  Widget build(BuildContext context) {
+    final isSold = status == PropertyStatus.sold;
+    final label = isSold ? 'SOLD' : 'RENTED';
+    final color = isSold ? const Color(0xFFE53935) : const Color(0xFFF4511E);
+
+    return Transform.rotate(
+      angle: -0.35, // ~20 degrees
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 32, vertical: 10),
+        decoration: BoxDecoration(
+          color: color,
+          borderRadius: BorderRadius.circular(4),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withValues(alpha: 0.3),
+              blurRadius: 12,
+              offset: const Offset(0, 4),
+            ),
+          ],
+        ),
+        child: Text(
+          label,
+          style: const TextStyle(
+            color: Colors.white,
+            fontSize: 28,
+            fontWeight: FontWeight.w900,
+            letterSpacing: 6,
+          ),
+        ),
+      ),
+    ).animate().fadeIn(duration: 400.ms).scale(
+          begin: const Offset(0.7, 0.7),
+          end: const Offset(1, 1),
+          duration: 400.ms,
+          curve: Curves.elasticOut,
+        );
+  }
 }
 
 // ─── Video Player ─────────────────────────────────────────────────────────────
@@ -1455,7 +1665,8 @@ class _BookingSheetState extends ConsumerState<BookingSheet> {
             padding:
                 const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
             decoration: BoxDecoration(
-              color: isSelected ? AppTheme.primary : AppTheme.surfaceVariant,
+              color:
+                  isSelected ? AppTheme.primary : AppTheme.surfaceVariant,
               borderRadius: BorderRadius.circular(AppTheme.radiusMD),
               border: Border.all(
                 color: isSelected ? AppTheme.primary : AppTheme.border,

@@ -196,6 +196,15 @@ class _BookingCard extends ConsumerStatefulWidget {
 class _BookingCardState extends ConsumerState<_BookingCard> {
   bool _isActing = false;
 
+  /// Whether this booking was cancelled because the property is no longer
+  /// available (sold/rented by another client).
+  bool get _cancelledDueToUnavailability =>
+      widget.booking.status == BookingStatus.cancelled &&
+      (widget.booking.cancellationReason
+              ?.toLowerCase()
+              .contains('no longer available') ??
+          false);
+
   @override
   Widget build(BuildContext context) {
     final booking = widget.booking;
@@ -203,14 +212,18 @@ class _BookingCardState extends ConsumerState<_BookingCard> {
     final statusColor = {
       BookingStatus.pending: AppTheme.warning,
       BookingStatus.confirmed: AppTheme.success,
-      BookingStatus.cancelled: AppTheme.error,
+      BookingStatus.cancelled: _cancelledDueToUnavailability
+          ? const Color(0xFFE53935)
+          : AppTheme.error,
       BookingStatus.completed: AppTheme.textSecondary,
     }[booking.status]!;
 
     final statusLabel = {
       BookingStatus.pending: 'Pending',
       BookingStatus.confirmed: 'Confirmed',
-      BookingStatus.cancelled: 'Cancelled',
+      BookingStatus.cancelled: _cancelledDueToUnavailability
+          ? 'Unavailable'
+          : 'Cancelled',
       BookingStatus.completed: 'Completed',
     }[booking.status]!;
 
@@ -218,12 +231,17 @@ class _BookingCardState extends ConsumerState<_BookingCard> {
       decoration: BoxDecoration(
         color: AppTheme.surface,
         borderRadius: BorderRadius.circular(AppTheme.radiusLG),
-        border: Border.all(color: AppTheme.border, width: 0.5),
+        border: Border.all(
+          color: _cancelledDueToUnavailability
+              ? const Color(0xFFE53935).withOpacity(0.2)
+              : AppTheme.border,
+          width: _cancelledDueToUnavailability ? 1 : 0.5,
+        ),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // ── Property row
+          // ── Property row ──────────────────────────────────────────────
           Padding(
             padding: const EdgeInsets.all(14),
             child: Row(
@@ -279,11 +297,12 @@ class _BookingCardState extends ConsumerState<_BookingCard> {
 
                 // Status badge
                 Container(
-                  padding:
-                      const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                  padding: const EdgeInsets.symmetric(
+                      horizontal: 10, vertical: 4),
                   decoration: BoxDecoration(
                     color: statusColor.withOpacity(0.1),
-                    borderRadius: BorderRadius.circular(AppTheme.radiusFull),
+                    borderRadius:
+                        BorderRadius.circular(AppTheme.radiusFull),
                   ),
                   child: Text(
                     statusLabel,
@@ -298,7 +317,60 @@ class _BookingCardState extends ConsumerState<_BookingCard> {
             ),
           ),
 
-          // ── Action buttons
+          // ── "Property no longer available" notice (client view) ───────
+          if (!widget.isAgent && _cancelledDueToUnavailability) ...[
+            const Divider(height: 1),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(14, 10, 14, 14),
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Icon(Icons.info_outline,
+                      size: 16, color: Color(0xFFE53935)),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          'Property is no longer available',
+                          style: Theme.of(context)
+                              .textTheme
+                              .labelMedium
+                              ?.copyWith(
+                                color: const Color(0xFFE53935),
+                                fontWeight: FontWeight.w600,
+                              ),
+                        ),
+                        const SizedBox(height: 2),
+                        Text(
+                          'This property was sold or rented to another client. '
+                          'Your booking has been automatically cancelled.',
+                          style: Theme.of(context)
+                              .textTheme
+                              .bodySmall
+                              ?.copyWith(color: AppTheme.textSecondary),
+                        ),
+                        const SizedBox(height: 8),
+                        GestureDetector(
+                          onTap: () => context.go('/home'),
+                          child: Text(
+                            'Browse similar properties →',
+                            style: Theme.of(context)
+                                .textTheme
+                                .labelMedium
+                                ?.copyWith(color: AppTheme.primary),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+
+          // ── Action buttons ────────────────────────────────────────────
           if (_showActions(booking.status)) ...[
             const Divider(height: 1),
             Padding(
@@ -352,6 +424,7 @@ class _BookingCardState extends ConsumerState<_BookingCard> {
       );
     }
 
+    // confirmed → can cancel or mark done
     return Row(
       children: [
         Expanded(
@@ -368,7 +441,9 @@ class _BookingCardState extends ConsumerState<_BookingCard> {
         const SizedBox(width: 10),
         Expanded(
           child: ElevatedButton(
-            onPressed: () => _updateStatus(BookingStatus.completed),
+            // "Mark Done" now shows a confirmation dialog that explains
+            // that the property will be marked sold/rented.
+            onPressed: () => _showMarkDoneDialog(booking),
             style: ElevatedButton.styleFrom(
               backgroundColor: AppTheme.accent,
               padding: const EdgeInsets.symmetric(vertical: 10),
@@ -397,7 +472,8 @@ class _BookingCardState extends ConsumerState<_BookingCard> {
         const SizedBox(width: 10),
         Expanded(
           child: ElevatedButton(
-            onPressed: () => context.push('/property/${booking.propertyId}'),
+            onPressed: () =>
+                context.push('/property/${booking.propertyId}'),
             style: ElevatedButton.styleFrom(
               padding: const EdgeInsets.symmetric(vertical: 10),
             ),
@@ -425,6 +501,115 @@ class _BookingCardState extends ConsumerState<_BookingCard> {
     }
   }
 
+  /// Shows a confirmation dialog before marking a booking as completed.
+  /// Informs the agent that:
+  ///   • The property will be marked sold/rented automatically.
+  ///   • All other active bookings for that property will be cancelled.
+  void _showMarkDoneDialog(Booking booking) {
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(AppTheme.radiusXL),
+        ),
+        title: Row(
+          children: [
+            Container(
+              width: 36,
+              height: 36,
+              decoration: const BoxDecoration(
+                color: Color(0xFFFFF3E0),
+                shape: BoxShape.circle,
+              ),
+              child: const Icon(Icons.check_circle_outline,
+                  size: 20, color: AppTheme.accent),
+            ),
+            const SizedBox(width: 12),
+            const Text('Mark as Done?'),
+          ],
+        ),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              'This will mark the viewing as completed and update the property status.',
+              style: Theme.of(context).textTheme.bodyMedium,
+            ),
+            const SizedBox(height: 12),
+
+            // What will happen summary
+            Container(
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: AppTheme.surfaceVariant,
+                borderRadius: BorderRadius.circular(AppTheme.radiusMD),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    'What happens next:',
+                    style: Theme.of(context).textTheme.labelMedium?.copyWith(
+                          fontWeight: FontWeight.w700,
+                        ),
+                  ),
+                  const SizedBox(height: 8),
+                  _BulletRow(
+                    icon: Icons.sell_outlined,
+                    color: const Color(0xFFE53935),
+                    text:
+                        'Property will be marked as Sold / Rented',
+                  ),
+                  const SizedBox(height: 6),
+                  _BulletRow(
+                    icon: Icons.cancel_outlined,
+                    color: AppTheme.warning,
+                    text:
+                        'All other pending / confirmed bookings for this property will be automatically cancelled',
+                  ),
+                  const SizedBox(height: 6),
+                  _BulletRow(
+                    icon: Icons.bar_chart_outlined,
+                    color: AppTheme.primary,
+                    text: 'Your sold count will be updated',
+                  ),
+                ],
+              ),
+            ),
+
+            const SizedBox(height: 10),
+            Text(
+              'This action cannot be undone.',
+              style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                    color: AppTheme.textSecondary,
+                  ),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('Not yet'),
+          ),
+          ElevatedButton(
+            onPressed: () async {
+              Navigator.pop(ctx);
+              await WidgetsBinding.instance.endOfFrame;
+              if (context.mounted) {
+                _updateStatus(BookingStatus.completed);
+              }
+            },
+            style: ElevatedButton.styleFrom(
+              backgroundColor: AppTheme.accent,
+            ),
+            child: const Text('Yes, mark done'),
+          ),
+        ],
+      ),
+    );
+  }
+
   void _showCancelDialog() {
     showDialog(
       context: context,
@@ -442,12 +627,6 @@ class _BookingCardState extends ConsumerState<_BookingCard> {
             child: const Text('Keep it'),
           ),
           TextButton(
-            // THE FIX: await endOfFrame after dialog pop before calling
-            // _updateStatus. The status update triggers a Riverpod rebuild
-            // which re-inserts the card's widgets in the same frame the dialog
-            // is being removed, causing a duplicate-GlobalKey assertion.
-            // Waiting for endOfFrame lets the dialog route fully deregister
-            // its keys before the list rebuilds.
             onPressed: () async {
               Navigator.pop(context);
               await WidgetsBinding.instance.endOfFrame;
@@ -474,6 +653,37 @@ class _BookingCardState extends ConsumerState<_BookingCard> {
         color: AppTheme.textTertiary,
         size: 28,
       ),
+    );
+  }
+}
+
+// ─── Helper: bullet row ───────────────────────────────────────────────────────
+
+class _BulletRow extends StatelessWidget {
+  final IconData icon;
+  final Color color;
+  final String text;
+
+  const _BulletRow({
+    required this.icon,
+    required this.color,
+    required this.text,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Icon(icon, size: 15, color: color),
+        const SizedBox(width: 8),
+        Expanded(
+          child: Text(
+            text,
+            style: Theme.of(context).textTheme.bodySmall,
+          ),
+        ),
+      ],
     );
   }
 }

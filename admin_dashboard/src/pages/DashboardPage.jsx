@@ -198,7 +198,8 @@ export default function DashboardPage() {
 
       const [
         totalUsers, totalListings, totalBookings,
-        pendingListings, pendingBookings, activeAgents, newUsersToday
+        pendingListings, pendingBookings, activeAgents, newUsersToday,
+        soldProperties, rentedProperties
       ] = await Promise.all([
         countDocs('users'),
         countDocs('properties'),
@@ -207,6 +208,8 @@ export default function DashboardPage() {
         countDocs('bookings', where('status', '==', 'pending')),
         countDocs('users', where('role', '==', 'agent'), where('isVerified', '==', true)),
         countDocs('users', where('createdAt', '>=', todayStart)),
+        countDocs('properties', where('status', '==', 'sold')),
+        countDocs('properties', where('status', '==', 'rented')),
       ])
 
       // Revenue — sum from transactions
@@ -217,7 +220,8 @@ export default function DashboardPage() {
       txSnap.forEach(d => { totalRevenue += d.data().amount ?? 0 })
 
       setStats({ totalUsers, totalListings, totalBookings, totalRevenue,
-                 pendingListings, pendingBookings, activeAgents, newUsersToday })
+                 pendingListings, pendingBookings, activeAgents, newUsersToday,
+                 soldProperties, rentedProperties })
 
       // Recent activity
       const activitySnap = await getDocs(
@@ -504,9 +508,11 @@ export default function DashboardPage() {
               Platform Health
             </p>
             {[
-              { label: 'Verified Agents', value: stats.activeAgents, color: 'bg-accent' },
-              { label: 'Active Listings', value: stats.totalListings, color: 'bg-primary' },
-              { label: 'Total Members', value: stats.totalUsers, color: 'bg-status-pending' },
+              { label: 'Verified Agents', value: stats.activeAgents,    color: 'bg-accent' },
+              { label: 'Active Listings', value: stats.totalListings,   color: 'bg-primary' },
+              { label: 'Sold',            value: stats.soldProperties,  color: 'bg-status-error' },
+              { label: 'Rented',          value: stats.rentedProperties, color: 'bg-status-pending' },
+              { label: 'Total Members',   value: stats.totalUsers,      color: 'bg-text-tertiary' },
             ].map(item => (
               <div key={item.label} className="flex items-center justify-between py-1.5">
                 <div className="flex items-center gap-2">

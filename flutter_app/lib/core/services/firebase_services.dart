@@ -18,7 +18,7 @@ class AuthService {
     required String password,
     required String fullName,
     String? phoneNumber,
-    UserRole role = UserRole.user, // always UserRole.user from register screen
+    UserRole role = UserRole.user,
   }) async {
     final credential = await _auth.createUserWithEmailAndPassword(
       email: email,
@@ -39,8 +39,6 @@ class AuthService {
 
     await _db.collection('users').doc(user.id).set(user.toMap());
 
-    // Agent profile is only created when admin promotes the user,
-    // not at registration time.
     if (role == UserRole.agent) {
       await _createAgentProfile(user.id, fullName, email);
     }
@@ -183,7 +181,6 @@ class PropertyService {
         await _db.collection('properties').doc(propertyId).get();
     if (!doc.exists) throw Exception('Property not found');
 
-    // Increment view count without awaiting — fire and forget
     _db.collection('properties').doc(propertyId).update({
       'viewCount': FieldValue.increment(1),
     });
@@ -264,15 +261,6 @@ class PropertyService {
         .toList();
   }
 
-  /// Fetches approved active properties within a lat/lng bounding box.
-  /// Called whenever the map camera stops moving.
-  ///
-  /// Firestore can only apply a range filter on one field, so latitude is
-  /// filtered in the query and longitude is filtered client-side.
-  ///
-  /// Required Firestore composite index:
-  ///   collection : properties
-  ///   fields     : isApproved ASC · status ASC · location.latitude ASC
   Future<List<Property>> getPropertiesInBounds({
     required double swLat,
     required double swLng,
@@ -299,7 +287,6 @@ class PropertyService {
 
     final snapshot = await query.limit(limit).get();
 
-    // Filter longitude client-side (Firestore range-on-one-field limitation)
     return snapshot.docs
         .map((doc) => Property.fromFirestore(doc))
         .where((p) =>
@@ -390,6 +377,11 @@ class PropertyService {
 //
 // createBooking requires paymentStatus == PaymentStatus.paid.
 // The agent is only notified once payment is confirmed.
+//
+// STATUS → PROPERTY STATUS MAPPING
+// When an agent marks a booking as `completed` the property is automatically
+// transitioned to either `sold` (sale listing) or `rented` (rent listing).
+// All other pending/confirmed bookings for the same property are cancelled.
 
 class BookingService {
   final FirebaseFirestore _db = FirebaseFirestore.instance;
@@ -425,7 +417,6 @@ class BookingService {
 
     final ref = await _db.collection('bookings').add(data);
 
-    // Notify agent via Cloud Function
     FirebaseFunctions.instanceFor(region: 'us-central1')
         .httpsCallable('notifyAgent')
         .call({
@@ -440,10 +431,6 @@ class BookingService {
   }
 
   /// Returns an active booking for the given user and property, or null.
-  /// Prevents duplicate bookings.
-  ///
-  /// Required Firestore composite index:
-  ///   bookings — userId ASC · propertyId ASC · status ASC
   Future<Booking?> getActiveBookingForProperty({
     required String userId,
     required String propertyId,
@@ -480,17 +467,103 @@ class BookingService {
             snap.docs.map((d) => Booking.fromFirestore(d)).toList());
   }
 
+  /// Updates a booking's status.
+  ///
+  /// When [status] is [BookingStatus.completed]:
+  ///   1. The booking document is marked completed.
+  ///   2. The linked property is marked `sold` or `rented` depending on its
+  ///      [ListingType] — all inside a single Firestore batch so the two
+  ///      writes are atomic.
+  ///   3. Every other pending/confirmed booking for that property is
+  ///      cancelled (with reason "Property no longer available") so no other
+  ///      client sees stale availability.
+  ///   4. The agent's `soldCount` counter is incremented.
   Future<void> updateBookingStatus(
     String bookingId,
     BookingStatus status, {
     String? cancellationReason,
   }) async {
-    await _db.collection('bookings').doc(bookingId).update({
-      'status': status.name,
-      if (cancellationReason != null)
-        'cancellationReason': cancellationReason,
+    if (status == BookingStatus.completed) {
+      await _completeBookingAndCloseProperty(bookingId);
+    } else {
+      await _db.collection('bookings').doc(bookingId).update({
+        'status': status.name,
+        if (cancellationReason != null)
+          'cancellationReason': cancellationReason,
+        'updatedAt': FieldValue.serverTimestamp(),
+      });
+    }
+  }
+
+  /// Internal: atomically completes the booking and marks the property
+  /// as sold/rented.
+  Future<void> _completeBookingAndCloseProperty(String bookingId) async {
+    // 1. Read the booking to find the propertyId and agentId.
+    final bookingDoc =
+        await _db.collection('bookings').doc(bookingId).get();
+    if (!bookingDoc.exists) throw Exception('Booking not found');
+
+    final bookingData = bookingDoc.data()!;
+    final propertyId = bookingData['propertyId'] as String;
+    final agentId = bookingData['agentId'] as String? ?? '';
+
+    // 2. Read the property to determine listing type.
+    final propertyDoc =
+        await _db.collection('properties').doc(propertyId).get();
+    if (!propertyDoc.exists) throw Exception('Property not found');
+
+    final propertyData = propertyDoc.data()!;
+    final listingTypeName = propertyData['listingType'] as String? ?? 'sale';
+    final listingType = ListingType.values.firstWhere(
+      (l) => l.name == listingTypeName,
+      orElse: () => ListingType.sale,
+    );
+    final newPropertyStatus = listingType == ListingType.rent
+        ? PropertyStatus.rented
+        : PropertyStatus.sold;
+
+    // 3. Find all OTHER active bookings for the same property to cancel.
+    final otherBookingsSnap = await _db
+        .collection('bookings')
+        .where('propertyId', isEqualTo: propertyId)
+        .where('status', whereIn: ['pending', 'confirmed'])
+        .get();
+
+    // 4. Build and commit a batch.
+    final batch = _db.batch();
+
+    // 4a. Complete this booking.
+    batch.update(_db.collection('bookings').doc(bookingId), {
+      'status': BookingStatus.completed.name,
       'updatedAt': FieldValue.serverTimestamp(),
     });
+
+    // 4b. Update the property status.
+    batch.update(_db.collection('properties').doc(propertyId), {
+      'status': newPropertyStatus.name,
+      'isApproved': true, // keep it visible so users can see the sold banner
+      'updatedAt': FieldValue.serverTimestamp(),
+    });
+
+    // 4c. Cancel every other active booking for this property.
+    for (final doc in otherBookingsSnap.docs) {
+      if (doc.id == bookingId) continue; // skip the one we're completing
+      batch.update(doc.reference, {
+        'status': BookingStatus.cancelled.name,
+        'cancellationReason': 'Property is no longer available',
+        'updatedAt': FieldValue.serverTimestamp(),
+      });
+    }
+
+    // 4d. Increment agent soldCount.
+    if (agentId.isNotEmpty) {
+      batch.update(_db.collection('agents').doc(agentId), {
+        'soldCount': FieldValue.increment(1),
+        'updatedAt': FieldValue.serverTimestamp(),
+      });
+    }
+
+    await batch.commit();
   }
 
   Future<List<String>> getAvailableTimeSlots(
@@ -523,20 +596,10 @@ class BookingService {
 }
 
 // ─── Payment Service ──────────────────────────────────────────────────────────
-//
-// M-Pesa Daraja integration via Cloud Functions.
-//
-// Required Cloud Functions:
-//   1. initiateMpesaPayment  — triggers STK Push
-//   2. checkMpesaPaymentStatus — polls transaction status
-//   3. createStripePaymentIntent — card payments (future)
-
 class PaymentService {
   final FirebaseFirestore _db = FirebaseFirestore.instance;
   final FirebaseFunctions _functions =
       FirebaseFunctions.instanceFor(region: 'us-central1');
-
-  // ── M-Pesa STK Push ───────────────────────────────────────────────────────
 
   Future<Map<String, dynamic>> initiateMpesaPayment({
     required String phone,
@@ -565,8 +628,6 @@ class PaymentService {
     return Map<String, dynamic>.from(result.data as Map);
   }
 
-  // ── Stripe ────────────────────────────────────────────────────────────────
-
   Future<Map<String, dynamic>> createStripePaymentIntent({
     required double amount,
     required String currency,
@@ -581,8 +642,6 @@ class PaymentService {
     });
     return Map<String, dynamic>.from(result.data as Map);
   }
-
-  // ── Transactions ──────────────────────────────────────────────────────────
 
   Future<String> recordTransaction(Transaction transaction) async {
     final ref =
@@ -707,19 +766,14 @@ class AdminService {
     });
   }
 
-  /// Promotes or demotes a user's role.
-  /// When promoting to agent, also creates the agent profile document
-  /// if it doesn't already exist.
   Future<void> updateUserRole(String userId, UserRole role) async {
     final batch = _db.batch();
 
-    // Update role on the user document
     batch.update(_db.collection('users').doc(userId), {
       'role': role.name,
       'updatedAt': FieldValue.serverTimestamp(),
     });
 
-    // If promoting to agent, ensure an agent profile exists
     if (role == UserRole.agent) {
       final agentDoc =
           await _db.collection('agents').doc(userId).get();

@@ -103,6 +103,47 @@ enum PropertyAmenity {
   wifi, airConditioning, furnished, petFriendly, waterfront
 }
 
+/// Returns true when a property is no longer available to book or purchase.
+extension PropertyStatusX on PropertyStatus {
+  bool get isUnavailable =>
+      this == PropertyStatus.sold ||
+      this == PropertyStatus.rented ||
+      this == PropertyStatus.suspended;
+
+  /// Human-readable label shown in the UI.
+  String get displayLabel {
+    switch (this) {
+      case PropertyStatus.sold:
+        return 'Sold';
+      case PropertyStatus.rented:
+        return 'Rented';
+      case PropertyStatus.suspended:
+        return 'Suspended';
+      case PropertyStatus.pending:
+        return 'Pending';
+      case PropertyStatus.active:
+        return 'Active';
+    }
+  }
+
+  /// Badge colour used throughout the UI.
+  /// Import `package:flutter/material.dart` where consumed.
+  String get colorHex {
+    switch (this) {
+      case PropertyStatus.sold:
+        return '#E53935'; // red
+      case PropertyStatus.rented:
+        return '#F4511E'; // deep-orange
+      case PropertyStatus.suspended:
+        return '#757575'; // grey
+      case PropertyStatus.pending:
+        return '#FB8C00'; // amber
+      case PropertyStatus.active:
+        return '#43A047'; // green
+    }
+  }
+}
+
 class PropertyLocation {
   final double latitude;
   final double longitude;
@@ -211,6 +252,9 @@ class Property {
     required this.createdAt,
     required this.updatedAt,
   });
+
+  /// Convenience: is this property no longer on the market?
+  bool get isUnavailable => status.isUnavailable;
 
   factory Property.fromFirestore(DocumentSnapshot doc) {
     final data = doc.data() as Map<String, dynamic>;

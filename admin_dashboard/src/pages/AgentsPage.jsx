@@ -65,9 +65,9 @@ function AgentAvatar({ agent, size = 'md' }) {
     lg: 'w-14 h-14 text-base',
   }[size]
 
-  return agent.photoURL ? (
+  return agent.avatarUrl ? (
     <img
-      src={agent.photoURL}
+      src={agent.avatarUrl}
       alt={agent.displayName}
       className={clsx('rounded-xl object-cover flex-shrink-0', sz)}
     />
@@ -160,10 +160,10 @@ function AgentDrawer({ agent, onClose, onAction, actionLoading }) {
   if (!agent) return null
 
   const stats = [
-    { label: 'Listings',  value: listings.length || agent.listingCount || 0, icon: Building2, color: 'text-primary' },
-    { label: 'Bookings',  value: agent.bookingCount || 0,  icon: Calendar,  color: 'text-accent' },
-    { label: 'Rating',    value: agent.rating ? `${agent.rating.toFixed(1)}★` : '—', icon: Star, color: 'text-status-pending' },
-    { label: 'Revenue',   value: fmtKES(agent.totalRevenue), icon: BarChart2, color: 'text-status-active' },
+    { label: 'Listings',  value: agent.totalListings || 0,                         icon: Building2, color: 'text-primary' },
+    { label: 'Sold',      value: agent.soldCount || 0,                               icon: BarChart2, color: 'text-status-error' },
+    { label: 'Rating',    value: agent.rating ? `${agent.rating.toFixed(1)}★` : '—', icon: Star,     color: 'text-status-pending' },
+    { label: 'Reviews',   value: agent.reviewCount || 0,                             icon: Calendar,  color: 'text-accent' },
   ]
 
   return (
@@ -193,7 +193,7 @@ function AgentDrawer({ agent, onClose, onAction, actionLoading }) {
               {agent.agency && (
                 <p className="text-xs text-text-tertiary mt-0.5">{agent.agency}</p>
               )}
-              <p className="text-xs text-text-tertiary mt-1">Joined {fmtDate(agent.createdAt)}</p>
+              <p className="text-xs text-text-tertiary mt-1">Joined {fmtDate(agent.memberSince || agent.createdAt)}</p>
             </div>
           </div>
 
@@ -234,7 +234,7 @@ function AgentDrawer({ agent, onClose, onAction, actionLoading }) {
                   { label: 'Email',   value: agent.email || '—',   icon: Mail },
                   { label: 'Phone',   value: agent.phone || '—',   icon: Phone },
                   { label: 'Agency',  value: agent.agency || '—',  icon: Building2 },
-                  { label: 'License', value: agent.licenseNo || '—', icon: BadgeCheck },
+                  { label: 'License', value: agent.licenseNumber || '—', icon: BadgeCheck },
                 ].map(({ label, value, icon: Icon }) => (
                   <div key={label} className="flex items-center justify-between py-2.5 border-b border-neutral-divider last:border-0">
                     <div className="flex items-center gap-2 text-text-secondary">
@@ -371,14 +371,18 @@ export default function AgentsPage() {
     const c = []
     if (verifiedFilter === 'true')  c.push(where('isVerified', '==', true))
     if (verifiedFilter === 'false') c.push(where('isVerified', '==', false))
-    c.push(orderBy('createdAt', 'desc'))
+    c.push(orderBy('memberSince', 'desc'))
     return c
   }, [verifiedFilter])
 
   useEffect(() => {
     const loadCount = async () => {
       try {
-        const q = query(collection(db, 'agents'), ...buildConstraints())
+        // Count query without orderBy to avoid composite index requirement
+        const countConstraints = []
+        if (verifiedFilter === 'true')  countConstraints.push(where('isVerified', '==', true))
+        if (verifiedFilter === 'false') countConstraints.push(where('isVerified', '==', false))
+        const q = query(collection(db, 'agents'), ...countConstraints)
         const snap = await getCountFromServer(q)
         setTotal(snap.data().count)
       } catch { setTotal(0) }
@@ -465,7 +469,7 @@ export default function AgentsPage() {
   // ─── Client search ─────────────────────────────────────────────────────────
   const filtered = search.trim()
     ? agents.filter(a =>
-        [a.displayName, a.email, a.phone, a.agency, a.licenseNo]
+        [a.displayName, a.email, a.phone, a.agency, a.licenseNumber]
           .some(v => v?.toLowerCase().includes(search.toLowerCase()))
       )
     : agents
@@ -570,7 +574,7 @@ export default function AgentsPage() {
                     {/* Listings */}
                     <td>
                       <span className="text-sm font-semibold text-text-primary">
-                        {agent.listingCount ?? '—'}
+                        {agent.totalListings ?? '—'}
                       </span>
                     </td>
                     {/* Rating */}
@@ -588,7 +592,7 @@ export default function AgentsPage() {
                     </td>
                     {/* Joined */}
                     <td>
-                      <span className="text-sm text-text-secondary">{fmtDate(agent.createdAt)}</span>
+                      <span className="text-sm text-text-secondary">{fmtDate(agent.memberSince || agent.createdAt)}</span>
                     </td>
                     {/* Verified */}
                     <td><VerifyBadge isVerified={agent.isVerified} /></td>

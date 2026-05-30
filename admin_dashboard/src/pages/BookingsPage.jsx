@@ -1,8 +1,8 @@
 import React, { useEffect, useState, useCallback } from 'react'
 import {
   collection, query, where, orderBy, limit,
-  startAfter, getDocs, doc, updateDoc, deleteDoc,
-  serverTimestamp, getCountFromServer, Timestamp
+  startAfter, getDocs, getDoc, doc, updateDoc, deleteDoc,
+  writeBatch, serverTimestamp, getCountFromServer, Timestamp, increment
 } from 'firebase/firestore'
 import { db } from '../firebase/config'
 import {
@@ -345,18 +345,67 @@ export default function BookingsPage() {
     setActLoading(true)
     const ref = doc(db, 'bookings', booking.id)
     try {
-      const updates = {
-        confirm:  { status: 'confirmed', confirmedAt: serverTimestamp() },
-        complete: { status: 'completed', completedAt: serverTimestamp() },
-        cancel:   { status: 'cancelled', cancelledAt: serverTimestamp() },
-      }[action]
       if (action === 'delete') {
         await deleteDoc(ref)
         showToast('Booking permanently deleted.')
+
+      } else if (action === 'complete') {
+        // Mirror Flutter _completeBookingAndCloseProperty:
+        // 1. Read the property to determine listingType
+        const propertySnap = await getDoc(doc(db, 'properties', booking.listingId || booking.propertyId))
+        const listingType = propertySnap.exists() ? propertySnap.data().listingType : 'sale'
+        const newStatus = listingType === 'rent' ? 'rented' : 'sold'
+
+        // 2. Find all other active bookings for this property
+        const otherSnap = await getDocs(query(
+          collection(db, 'bookings'),
+          where('propertyId', '==', booking.listingId || booking.propertyId),
+          where('status', 'in', ['pending', 'confirmed'])
+        ))
+
+        // 3. Batch: complete this booking + update property + cancel others
+        const batch = writeBatch(db)
+
+        batch.update(ref, { status: 'completed', completedAt: serverTimestamp(), updatedAt: serverTimestamp() })
+
+        if (propertySnap.exists()) {
+          batch.update(doc(db, 'properties', booking.listingId || booking.propertyId), {
+            status: newStatus,
+            isApproved: true,
+            updatedAt: serverTimestamp(),
+          })
+        }
+
+        otherSnap.docs.forEach(d => {
+          if (d.id === booking.id) return
+          batch.update(d.ref, {
+            status: 'cancelled',
+            cancellationReason: 'Property is no longer available',
+            updatedAt: serverTimestamp(),
+          })
+        })
+
+        // 4. Increment agent soldCount
+        if (booking.agentId) {
+          batch.update(doc(db, 'agents', booking.agentId), {
+            soldCount: increment(1),
+            updatedAt: serverTimestamp(),
+          })
+        }
+
+        await batch.commit()
+
+        showToast(`Booking completed. Property marked as ${newStatus}.`)
+
       } else {
+        const updates = {
+          confirm: { status: 'confirmed', confirmedAt: serverTimestamp() },
+          cancel:  { status: 'cancelled', cancelledAt: serverTimestamp() },
+        }[action]
         await updateDoc(ref, updates)
         showToast(`Booking ${action}ed successfully.`)
       }
+
       setConfirm(null)
       setSelected(null)
       await loadPage()

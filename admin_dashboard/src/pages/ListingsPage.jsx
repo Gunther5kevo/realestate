@@ -23,6 +23,8 @@ const STATUS_OPTIONS = [
   { value: 'approved',  label: 'Approved' },
   { value: 'suspended', label: 'Suspended' },
   { value: 'featured',  label: 'Featured' },
+  { value: 'sold',      label: 'Sold' },
+  { value: 'rented',    label: 'Rented' },
 ]
 
 const TYPE_OPTIONS = [
@@ -56,9 +58,11 @@ function Skeleton({ className }) {
 
 // ─── Status Badge ─────────────────────────────────────────────────────────────
 function StatusBadge({ listing }) {
-  if (listing.isFeatured)           return <span className="badge badge-primary"><Star size={9} />Featured</span>
-  if (listing.status === 'suspended') return <span className="badge badge-error"><Ban size={9} />Suspended</span>
-  if (listing.isApproved)           return <span className="badge badge-active"><CheckCircle size={9} />Approved</span>
+  if (listing.status === 'sold')      return <span className="badge badge-error"><XCircle size={9} />Sold</span>
+  if (listing.status === 'rented')    return <span className="badge" style={{background:'#FFF3E0',color:'#E64A19'}}><Ban size={9} />Rented</span>
+  if (listing.isFeatured)             return <span className="badge badge-primary"><Star size={9} />Featured</span>
+  if (listing.status === 'suspended') return <span className="badge badge-neutral"><Ban size={9} />Suspended</span>
+  if (listing.isApproved)             return <span className="badge badge-active"><CheckCircle size={9} />Approved</span>
   return <span className="badge badge-pending">Pending</span>
 }
 
@@ -197,50 +201,66 @@ function ListingDrawer({ listing, onClose, onAction, actionLoading }) {
           {/* Actions */}
           <div className="space-y-2 pt-2">
             <p className="text-xs font-semibold text-text-secondary uppercase tracking-wider mb-3">Actions</p>
-            {!listing.isApproved && listing.status !== 'suspended' && (
-              <button
-                onClick={() => onAction('approve', listing)}
-                disabled={actionLoading}
-                className="w-full btn-success border border-green-100 rounded-lg py-2.5 justify-center disabled:opacity-50"
-              >
-                <CheckCircle size={15} /> Approve Listing
-              </button>
+
+            {/* Sold / Rented — no further admin actions available */}
+            {(listing.status === 'sold' || listing.status === 'rented') && (
+              <div className="px-3 py-3 rounded-lg bg-neutral-variant text-center">
+                <p className="text-sm font-semibold text-text-primary capitalize">{listing.status}</p>
+                <p className="text-xs text-text-tertiary mt-1">
+                  This property was marked {listing.status} when its booking was completed.
+                  No further actions are available.
+                </p>
+              </div>
             )}
-            {listing.isApproved && !listing.isFeatured && (
-              <button
-                onClick={() => onAction('feature', listing)}
-                disabled={actionLoading}
-                className="w-full btn-accent border border-green-100 rounded-lg py-2.5 justify-center disabled:opacity-50"
-              >
-                <Star size={15} /> Feature Listing
-              </button>
-            )}
-            {listing.isFeatured && (
-              <button
-                onClick={() => onAction('unfeature', listing)}
-                disabled={actionLoading}
-                className="w-full btn-ghost border border-neutral-border rounded-lg py-2.5 justify-center disabled:opacity-50"
-              >
-                <Star size={15} /> Remove from Featured
-              </button>
-            )}
-            {listing.status !== 'suspended' && (
-              <button
-                onClick={() => onAction('reject', listing)}
-                disabled={actionLoading}
-                className="w-full btn-danger border border-red-100 rounded-lg py-2.5 justify-center disabled:opacity-50"
-              >
-                <XCircle size={15} /> Reject / Suspend
-              </button>
-            )}
-            {listing.status === 'suspended' && (
-              <button
-                onClick={() => onAction('reinstate', listing)}
-                disabled={actionLoading}
-                className="w-full btn-ghost border border-neutral-border rounded-lg py-2.5 justify-center disabled:opacity-50"
-              >
-                <RefreshCw size={15} /> Reinstate Listing
-              </button>
+
+            {listing.status !== 'sold' && listing.status !== 'rented' && (
+              <>
+                {!listing.isApproved && listing.status !== 'suspended' && (
+                  <button
+                    onClick={() => onAction('approve', listing)}
+                    disabled={actionLoading}
+                    className="w-full btn-success border border-green-100 rounded-lg py-2.5 justify-center disabled:opacity-50"
+                  >
+                    <CheckCircle size={15} /> Approve Listing
+                  </button>
+                )}
+                {listing.isApproved && !listing.isFeatured && (
+                  <button
+                    onClick={() => onAction('feature', listing)}
+                    disabled={actionLoading}
+                    className="w-full btn-accent border border-green-100 rounded-lg py-2.5 justify-center disabled:opacity-50"
+                  >
+                    <Star size={15} /> Feature Listing
+                  </button>
+                )}
+                {listing.isFeatured && (
+                  <button
+                    onClick={() => onAction('unfeature', listing)}
+                    disabled={actionLoading}
+                    className="w-full btn-ghost border border-neutral-border rounded-lg py-2.5 justify-center disabled:opacity-50"
+                  >
+                    <Star size={15} /> Remove from Featured
+                  </button>
+                )}
+                {listing.status !== 'suspended' && (
+                  <button
+                    onClick={() => onAction('reject', listing)}
+                    disabled={actionLoading}
+                    className="w-full btn-danger border border-red-100 rounded-lg py-2.5 justify-center disabled:opacity-50"
+                  >
+                    <XCircle size={15} /> Reject / Suspend
+                  </button>
+                )}
+                {listing.status === 'suspended' && (
+                  <button
+                    onClick={() => onAction('reinstate', listing)}
+                    disabled={actionLoading}
+                    className="w-full btn-ghost border border-neutral-border rounded-lg py-2.5 justify-center disabled:opacity-50"
+                  >
+                    <RefreshCw size={15} /> Reinstate Listing
+                  </button>
+                )}
+              </>
             )}
           </div>
         </div>
@@ -276,6 +296,8 @@ export default function ListingsPage() {
     if (statusFilter === 'approved')  c.push(where('isApproved', '==', true))
     if (statusFilter === 'suspended') c.push(where('status', '==', 'suspended'))
     if (statusFilter === 'featured')  c.push(where('isFeatured', '==', true))
+    if (statusFilter === 'sold')      c.push(where('status', '==', 'sold'))
+    if (statusFilter === 'rented')    c.push(where('status', '==', 'rented'))
     if (typeFilter !== 'all')         c.push(where('type', '==', typeFilter))
     c.push(orderBy('createdAt', 'desc'))
     return c
@@ -542,45 +564,50 @@ export default function ListingsPage() {
                         >
                           <Eye size={14} />
                         </button>
-                        {!listing.isApproved && listing.status !== 'suspended' && (
-                          <button
-                            onClick={() => handleAction('approve', listing)}
-                            className="btn-success"
-                            title="Approve"
-                            disabled={actionLoading}
-                          >
-                            <CheckCircle size={13} /> Approve
-                          </button>
-                        )}
-                        {listing.isApproved && !listing.isFeatured && (
-                          <button
-                            onClick={() => handleAction('feature', listing)}
-                            className="btn-accent"
-                            title="Feature"
-                            disabled={actionLoading}
-                          >
-                            <Star size={13} /> Feature
-                          </button>
-                        )}
-                        {listing.status !== 'suspended' && listing.isApproved && (
-                          <button
-                            onClick={() => handleAction('reject', listing)}
-                            className="btn-danger"
-                            title="Reject"
-                            disabled={actionLoading}
-                          >
-                            <XCircle size={13} />
-                          </button>
-                        )}
-                        {listing.status === 'suspended' && (
-                          <button
-                            onClick={() => handleAction('reinstate', listing)}
-                            className="btn-ghost border border-neutral-border"
-                            title="Reinstate"
-                            disabled={actionLoading}
-                          >
-                            <RefreshCw size={13} />
-                          </button>
+                        {/* Sold/rented — no actions available in table row */}
+                        {listing.status !== 'sold' && listing.status !== 'rented' && (
+                          <>
+                            {!listing.isApproved && listing.status !== 'suspended' && (
+                              <button
+                                onClick={() => handleAction('approve', listing)}
+                                className="btn-success"
+                                title="Approve"
+                                disabled={actionLoading}
+                              >
+                                <CheckCircle size={13} /> Approve
+                              </button>
+                            )}
+                            {listing.isApproved && !listing.isFeatured && (
+                              <button
+                                onClick={() => handleAction('feature', listing)}
+                                className="btn-accent"
+                                title="Feature"
+                                disabled={actionLoading}
+                              >
+                                <Star size={13} /> Feature
+                              </button>
+                            )}
+                            {listing.status !== 'suspended' && listing.isApproved && (
+                              <button
+                                onClick={() => handleAction('reject', listing)}
+                                className="btn-danger"
+                                title="Reject"
+                                disabled={actionLoading}
+                              >
+                                <XCircle size={13} />
+                              </button>
+                            )}
+                            {listing.status === 'suspended' && (
+                              <button
+                                onClick={() => handleAction('reinstate', listing)}
+                                className="btn-ghost border border-neutral-border"
+                                title="Reinstate"
+                                disabled={actionLoading}
+                              >
+                                <RefreshCw size={13} />
+                              </button>
+                            )}
+                          </>
                         )}
                       </div>
                     </td>
