@@ -40,7 +40,8 @@ class AuthService {
     await _db.collection('users').doc(user.id).set(user.toMap());
 
     if (role == UserRole.agent) {
-      await _createAgentProfile(user.id, fullName, email);
+      await _createAgentProfile(user.id, fullName, email,
+          phoneNumber: phoneNumber);
     }
 
     return user;
@@ -85,19 +86,44 @@ class AuthService {
     if (fullName != null) {
       await _auth.currentUser!.updateDisplayName(fullName);
     }
+
+    // Keep agent profile in sync if the user is an agent.
+    final userDoc = await _db.collection('users').doc(uid).get();
+    final role = userDoc.data()?['role'];
+    if (role == 'agent') {
+      final agentUpdates = <String, dynamic>{
+        'updatedAt': FieldValue.serverTimestamp(),
+        if (fullName != null) 'displayName': fullName,
+        if (phoneNumber != null) 'phone': phoneNumber,
+        if (avatarUrl != null) 'avatarUrl': avatarUrl,
+      };
+      await _db.collection('agents').doc(uid).update(agentUpdates);
+    }
   }
 
   Future<void> _createAgentProfile(
-      String uid, String name, String email) async {
+    String uid,
+    String name,
+    String email, {
+    String? phoneNumber,
+    String? avatarUrl,
+  }) async {
     await _db.collection('agents').doc(uid).set({
       'displayName': name,
       'email': email,
+      'phone': phoneNumber ?? '',
+      'avatarUrl': avatarUrl ?? '',
+      'bio': '',
+      'agency': '',
+      'licenseNumber': '',
+      'website': '',
+      'socialLinks': {},
+      'specializations': [],
       'rating': 0.0,
       'reviewCount': 0,
       'totalListings': 0,
       'soldCount': 0,
       'isVerified': false,
-      'specializations': [],
       'memberSince': FieldValue.serverTimestamp(),
     });
   }
@@ -278,8 +304,7 @@ class PropertyService {
         .where('location.latitude', isLessThanOrEqualTo: neLat);
 
     if (listingType != null) {
-      query =
-          query.where('listingType', isEqualTo: listingType.name);
+      query = query.where('listingType', isEqualTo: listingType.name);
     }
     if (type != null) {
       query = query.where('type', isEqualTo: type.name);
@@ -295,9 +320,34 @@ class PropertyService {
         .toList();
   }
 
+  /// Creates a property, auto-populating agentName and agentPhone from the
+  /// agent's profile if the caller didn't supply them.
   Future<String> createProperty(Property property) async {
-    final docRef =
-        await _db.collection('properties').add(property.toMap());
+    String agentName = property.agentName ?? '';
+    String agentPhone = property.agentPhone ?? '';
+
+    if (agentName.isEmpty || agentPhone.isEmpty) {
+      final agentDoc =
+          await _db.collection('agents').doc(property.agentId).get();
+      if (agentDoc.exists) {
+        final d = agentDoc.data()!;
+        if (agentName.isEmpty) agentName = d['displayName'] ?? '';
+        if (agentPhone.isEmpty) agentPhone = d['phone'] ?? '';
+      }
+    }
+
+    final data = property.toMap()
+      ..['agentName'] = agentName
+      ..['agentPhone'] = agentPhone;
+
+    final docRef = await _db.collection('properties').add(data);
+
+    // Increment the agent's totalListings counter.
+    await _db.collection('agents').doc(property.agentId).update({
+      'totalListings': FieldValue.increment(1),
+      'updatedAt': FieldValue.serverTimestamp(),
+    });
+
     return docRef.id;
   }
 
@@ -308,6 +358,17 @@ class PropertyService {
   }
 
   Future<void> deleteProperty(String id) async {
+    // Decrement the agent's totalListings counter before deleting.
+    final doc = await _db.collection('properties').doc(id).get();
+    if (doc.exists) {
+      final agentId = doc.data()?['agentId'] as String?;
+      if (agentId != null && agentId.isNotEmpty) {
+        await _db.collection('agents').doc(agentId).update({
+          'totalListings': FieldValue.increment(-1),
+          'updatedAt': FieldValue.serverTimestamp(),
+        });
+      }
+    }
     await _db.collection('properties').doc(id).delete();
   }
 
@@ -498,7 +559,6 @@ class BookingService {
   /// Internal: atomically completes the booking and marks the property
   /// as sold/rented.
   Future<void> _completeBookingAndCloseProperty(String bookingId) async {
-    // 1. Read the booking to find the propertyId and agentId.
     final bookingDoc =
         await _db.collection('bookings').doc(bookingId).get();
     if (!bookingDoc.exists) throw Exception('Booking not found');
@@ -507,13 +567,13 @@ class BookingService {
     final propertyId = bookingData['propertyId'] as String;
     final agentId = bookingData['agentId'] as String? ?? '';
 
-    // 2. Read the property to determine listing type.
     final propertyDoc =
         await _db.collection('properties').doc(propertyId).get();
     if (!propertyDoc.exists) throw Exception('Property not found');
 
     final propertyData = propertyDoc.data()!;
-    final listingTypeName = propertyData['listingType'] as String? ?? 'sale';
+    final listingTypeName =
+        propertyData['listingType'] as String? ?? 'sale';
     final listingType = ListingType.values.firstWhere(
       (l) => l.name == listingTypeName,
       orElse: () => ListingType.sale,
@@ -522,32 +582,27 @@ class BookingService {
         ? PropertyStatus.rented
         : PropertyStatus.sold;
 
-    // 3. Find all OTHER active bookings for the same property to cancel.
     final otherBookingsSnap = await _db
         .collection('bookings')
         .where('propertyId', isEqualTo: propertyId)
         .where('status', whereIn: ['pending', 'confirmed'])
         .get();
 
-    // 4. Build and commit a batch.
     final batch = _db.batch();
 
-    // 4a. Complete this booking.
     batch.update(_db.collection('bookings').doc(bookingId), {
       'status': BookingStatus.completed.name,
       'updatedAt': FieldValue.serverTimestamp(),
     });
 
-    // 4b. Update the property status.
     batch.update(_db.collection('properties').doc(propertyId), {
       'status': newPropertyStatus.name,
-      'isApproved': true, // keep it visible so users can see the sold banner
+      'isApproved': true,
       'updatedAt': FieldValue.serverTimestamp(),
     });
 
-    // 4c. Cancel every other active booking for this property.
     for (final doc in otherBookingsSnap.docs) {
-      if (doc.id == bookingId) continue; // skip the one we're completing
+      if (doc.id == bookingId) continue;
       batch.update(doc.reference, {
         'status': BookingStatus.cancelled.name,
         'cancellationReason': 'Property is no longer available',
@@ -555,7 +610,6 @@ class BookingService {
       });
     }
 
-    // 4d. Increment agent soldCount.
     if (agentId.isNotEmpty) {
       batch.update(_db.collection('agents').doc(agentId), {
         'soldCount': FieldValue.increment(1),
@@ -698,6 +752,17 @@ class AgentService {
       ...data,
       'updatedAt': FieldValue.serverTimestamp(),
     });
+
+    // Keep the users doc display fields in sync.
+    final userUpdates = <String, dynamic>{
+      'updatedAt': FieldValue.serverTimestamp(),
+      if (data['displayName'] != null) 'fullName': data['displayName'],
+      if (data['phone'] != null) 'phoneNumber': data['phone'],
+      if (data['avatarUrl'] != null) 'avatarUrl': data['avatarUrl'],
+    };
+    if (userUpdates.length > 1) {
+      await _db.collection('users').doc(agentId).update(userUpdates);
+    }
   }
 
   Future<String> uploadAgentAvatar(String agentId, File image) async {
@@ -777,22 +842,53 @@ class AdminService {
     if (role == UserRole.agent) {
       final agentDoc =
           await _db.collection('agents').doc(userId).get();
+      final userDoc =
+          await _db.collection('users').doc(userId).get();
+      final data = userDoc.data() as Map<String, dynamic>;
+
       if (!agentDoc.exists) {
-        final userDoc =
-            await _db.collection('users').doc(userId).get();
-        final data = userDoc.data() as Map<String, dynamic>;
+        // First-time promotion: create a fully populated agent profile.
         batch.set(_db.collection('agents').doc(userId), {
           'displayName': data['fullName'] ?? '',
           'email': data['email'] ?? '',
           'phone': data['phoneNumber'] ?? '',
+          'avatarUrl': data['avatarUrl'] ?? '',
+          'bio': '',
+          'agency': '',
+          'licenseNumber': '',
+          'website': '',
+          'socialLinks': {},
+          'specializations': [],
           'rating': 0.0,
           'reviewCount': 0,
           'totalListings': 0,
           'soldCount': 0,
           'isVerified': false,
-          'specializations': [],
           'memberSince': FieldValue.serverTimestamp(),
         });
+      } else {
+        // Agent doc exists (e.g. role was removed and re-added): backfill
+        // any fields that are missing or empty from the users doc.
+        final existing = agentDoc.data() as Map<String, dynamic>;
+        final patch = <String, dynamic>{
+          'updatedAt': FieldValue.serverTimestamp(),
+        };
+        if ((existing['displayName'] ?? '').toString().isEmpty) {
+          patch['displayName'] = data['fullName'] ?? '';
+        }
+        if ((existing['email'] ?? '').toString().isEmpty) {
+          patch['email'] = data['email'] ?? '';
+        }
+        if ((existing['phone'] ?? '').toString().isEmpty) {
+          patch['phone'] = data['phoneNumber'] ?? '';
+        }
+        if ((existing['avatarUrl'] ?? '').toString().isEmpty) {
+          patch['avatarUrl'] = data['avatarUrl'] ?? '';
+        }
+        if (patch.length > 1) {
+          batch.update(
+              _db.collection('agents').doc(userId), patch);
+        }
       }
     }
 
