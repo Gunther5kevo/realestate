@@ -127,112 +127,92 @@ class _PropertyDetailScreenState extends ConsumerState<PropertyDetailScreen>
         : [
             'https://images.unsplash.com/photo-1564013799919-ab600027ffc6?w=1200'
           ];
-    final hasVideo = property.videoUrl != null && property.videoUrl!.isNotEmpty;
+    final hasVideo =
+        property.videoUrl != null && property.videoUrl!.isNotEmpty;
+
+    // Single source of truth — both the switcher and all overlays use this
     final showVideo = _showingVideo && hasVideo;
 
     return SizedBox(
       height: 320,
       child: Stack(
-        fit: StackFit.expand,
         children: [
-          // ── Inner stack: media + decorative overlays ──
-          Stack(
-            fit: StackFit.expand,
-            children: [
-              AnimatedSwitcher(
-                duration: const Duration(milliseconds: 300),
-                child: showVideo
-                    ? _PropertyVideoPlayer(
-                        key: ValueKey('video_${property.videoUrl}'),
-                        videoUrl: property.videoUrl!,
-                      )
-                    : PageView.builder(
-                        key: const ValueKey('images'),
-                        controller: _imageController,
-                        onPageChanged: (i) =>
-                            setState(() => _currentImageIndex = i),
-                        itemCount: images.length,
-                        itemBuilder: (context, index) => CachedNetworkImage(
-                          imageUrl: images[index],
-                          fit: BoxFit.cover,
-                          width: double.infinity,
-                          height: 320,
-                          placeholder: (_, __) => Shimmer.fromColors(
-                            baseColor: AppTheme.border,
-                            highlightColor: AppTheme.surfaceVariant,
-                            child: Container(color: AppTheme.border),
-                          ),
-                          errorWidget: (_, __, ___) => Container(
-                            color: AppTheme.surfaceVariant,
-                            child: const Icon(Icons.home_outlined,
-                                size: 64, color: AppTheme.textTertiary),
-                          ),
-                        ),
+          // ── Media switcher ────────────────────────────────────────────
+          AnimatedSwitcher(
+            duration: const Duration(milliseconds: 300),
+            child: showVideo
+                ? _PropertyVideoPlayer(
+                    // Prefix ensures key is always different from 'images'
+                    key: ValueKey('video_${property.videoUrl}'),
+                    videoUrl: property.videoUrl!,
+                  )
+                : PageView.builder(
+                    key: const ValueKey('images'),
+                    controller: _imageController,
+                    onPageChanged: (i) =>
+                        setState(() => _currentImageIndex = i),
+                    itemCount: images.length,
+                    itemBuilder: (context, index) => CachedNetworkImage(
+                      imageUrl: images[index],
+                      fit: BoxFit.cover,
+                      width: double.infinity,
+                      height: 320,
+                      placeholder: (_, __) => Shimmer.fromColors(
+                        baseColor: AppTheme.border,
+                        highlightColor: AppTheme.surfaceVariant,
+                        child: Container(color: AppTheme.border),
                       ),
-              ),
-
-              // ── Sold / Rented dimming overlay ──────────────────────────
-              if (property.isUnavailable)
-                Container(
-                  color: Colors.black.withValues(alpha: 0.45),
-                ),
-
-              // Page indicator — decorative only
-              if (!showVideo && images.length > 1)
-                Positioned(
-                  bottom: 20,
-                  left: 0,
-                  right: 0,
-                  child: IgnorePointer(
-                    child: Center(
-                      child: SmoothPageIndicator(
-                        controller: _imageController,
-                        count: images.length,
-                        effect: WormEffect(
-                          dotWidth: 6,
-                          dotHeight: 6,
-                          spacing: 4,
-                          activeDotColor: Colors.white,
-                          dotColor: Colors.white.withValues(alpha: 0.4),
-                        ),
+                      errorWidget: (_, __, ___) => Container(
+                        color: AppTheme.surfaceVariant,
+                        child: const Icon(Icons.home_outlined,
+                            size: 64, color: AppTheme.textTertiary),
                       ),
                     ),
                   ),
-                ),
-
-              // Image counter — decorative only
-              if (!showVideo)
-                Positioned(
-                  bottom: 16,
-                  right: 16,
-                  child: IgnorePointer(
-                    child: Container(
-                      padding: const EdgeInsets.symmetric(
-                          horizontal: 10, vertical: 4),
-                      decoration: BoxDecoration(
-                        color: Colors.black.withValues(alpha: 0.5),
-                        borderRadius:
-                            BorderRadius.circular(AppTheme.radiusFull),
-                      ),
-                      child: Text(
-                        '${_currentImageIndex + 1}/${images.length}',
-                        style: const TextStyle(
-                            color: Colors.white, fontSize: 11),
-                      ),
-                    ),
-                  ),
-                ),
-            ],
           ),
 
-          // ── Sold / Rented diagonal stamp ──────────────────────────────
-          if (property.isUnavailable)
-            Center(
-              child: _UnavailableStamp(status: property.status),
+          // ── Page indicator (photos only) ──────────────────────────────
+          if (!showVideo && images.length > 1)
+            Positioned(
+              bottom: 20,
+              left: 0,
+              right: 0,
+              child: Center(
+                child: SmoothPageIndicator(
+                  controller: _imageController,
+                  count: images.length,
+                  effect: WormEffect(
+                    dotWidth: 6,
+                    dotHeight: 6,
+                    spacing: 4,
+                    activeDotColor: Colors.white,
+                    dotColor: Colors.white.withValues(alpha: 0.4),
+                  ),
+                ),
+              ),
             ),
 
-          // ── Video / Photo toggle pill ──────────────────────────────────
-          if (hasVideo && !property.isUnavailable)
+          // ── Image counter (photos only) ───────────────────────────────
+          if (!showVideo)
+            Positioned(
+              bottom: 16,
+              right: 16,
+              child: Container(
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                decoration: BoxDecoration(
+                  color: Colors.black.withValues(alpha: 0.5),
+                  borderRadius: BorderRadius.circular(AppTheme.radiusFull),
+                ),
+                child: Text(
+                  '${_currentImageIndex + 1}/${images.length}',
+                  style: const TextStyle(color: Colors.white, fontSize: 11),
+                ),
+              ),
+            ),
+
+          // ── Photo / Video toggle pill (only when video exists) ────────
+          if (hasVideo)
             Positioned(
               top: 16,
               left: 0,
@@ -267,13 +247,6 @@ class _PropertyDetailScreenState extends ConsumerState<PropertyDetailScreen>
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             const SizedBox(height: 8),
-
-            // ── Unavailability banner ──────────────────────────────────
-            if (property.isUnavailable) ...[
-              _UnavailabilityBanner(status: property.status),
-              const SizedBox(height: 16),
-            ],
-
             _buildHeader(property),
             const SizedBox(height: 16),
             _buildLocationRow(property),
@@ -309,7 +282,7 @@ class _PropertyDetailScreenState extends ConsumerState<PropertyDetailScreen>
                   ),
                   const SizedBox(width: 8),
                   _StatusChip(
-                    label: _formatType(property.type),
+                    label: property.type.displayLabel,
                     color: AppTheme.textSecondary,
                   ),
                 ],
@@ -329,13 +302,8 @@ class _PropertyDetailScreenState extends ConsumerState<PropertyDetailScreen>
             Text(
               property.priceLabel,
               style: Theme.of(context).textTheme.headlineLarge?.copyWith(
-                    color: property.isUnavailable
-                        ? AppTheme.textSecondary
-                        : AppTheme.primary,
+                    color: AppTheme.primary,
                     fontFamily: AppTheme.fontFamilyDisplay,
-                    decoration: property.isUnavailable
-                        ? TextDecoration.lineThrough
-                        : null,
                   ),
             ),
             if (property.listingType == ListingType.rent)
@@ -507,8 +475,10 @@ class _PropertyDetailScreenState extends ConsumerState<PropertyDetailScreen>
   Widget _buildOverviewTab(Property property) {
     final details = <String, String>{
       if (property.type != PropertyType.land)
-        'Type': _formatType(property.type),
+        'Type': property.type.displayLabel,
       'Status': property.status.displayLabel,
+      if (property.bedroomLabel.isNotEmpty)
+        'Rooms': property.bedroomLabel,
       if (property.floors != null) 'Floors': '${property.floors}',
       if (property.yearBuilt != null) 'Built in': '${property.yearBuilt}',
       'Listing': property.listingType == ListingType.rent ? 'Rental' : 'Sale',
@@ -542,23 +512,13 @@ class _PropertyDetailScreenState extends ConsumerState<PropertyDetailScreen>
           itemCount: details.length,
           itemBuilder: (context, index) {
             final entry = details.entries.toList()[index];
-            final isStatusField = entry.key == 'Status';
             return Container(
-              padding: const EdgeInsets.symmetric(
-                  horizontal: 14, vertical: 10),
+              padding:
+                  const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
               decoration: BoxDecoration(
-                color: isStatusField && property.isUnavailable
-                    ? _unavailableColor(property.status)
-                        .withValues(alpha: 0.08)
-                    : AppTheme.surface,
+                color: AppTheme.surface,
                 borderRadius: BorderRadius.circular(AppTheme.radiusMD),
-                border: Border.all(
-                  color: isStatusField && property.isUnavailable
-                      ? _unavailableColor(property.status)
-                          .withValues(alpha: 0.3)
-                      : AppTheme.border,
-                  width: isStatusField && property.isUnavailable ? 1 : 0.5,
-                ),
+                border: Border.all(color: AppTheme.border, width: 0.5),
               ),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
@@ -567,17 +527,8 @@ class _PropertyDetailScreenState extends ConsumerState<PropertyDetailScreen>
                   Text(entry.key,
                       style: Theme.of(context).textTheme.labelSmall),
                   const SizedBox(height: 2),
-                  Text(
-                    entry.value,
-                    style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                          color: isStatusField && property.isUnavailable
-                              ? _unavailableColor(property.status)
-                              : null,
-                          fontWeight: isStatusField && property.isUnavailable
-                              ? FontWeight.w700
-                              : null,
-                        ),
-                  ),
+                  Text(entry.value,
+                      style: Theme.of(context).textTheme.titleMedium),
                 ],
               ),
             );
@@ -588,19 +539,37 @@ class _PropertyDetailScreenState extends ConsumerState<PropertyDetailScreen>
   }
 
   Widget _buildAmenitiesTab(Property property) {
-    const amenityData = {
-      PropertyAmenity.pool: ('Pool', Icons.pool_outlined),
-      PropertyAmenity.gym: ('Gym', Icons.fitness_center_outlined),
-      PropertyAmenity.parking: ('Parking', Icons.local_parking_outlined),
-      PropertyAmenity.security: ('Security', Icons.security_outlined),
-      PropertyAmenity.balcony: ('Balcony', Icons.balcony_outlined),
-      PropertyAmenity.garden: ('Garden', Icons.yard_outlined),
-      PropertyAmenity.elevator: ('Elevator', Icons.elevator_outlined),
-      PropertyAmenity.wifi: ('WiFi', Icons.wifi_outlined),
-      PropertyAmenity.airConditioning: ('AC', Icons.ac_unit_outlined),
-      PropertyAmenity.furnished: ('Furnished', Icons.chair_outlined),
-      PropertyAmenity.petFriendly: ('Pet Friendly', Icons.pets_outlined),
-      PropertyAmenity.waterfront: ('Waterfront', Icons.water_outlined),
+    const amenityIcons = {
+      // Security & Access
+      PropertyAmenity.guardhouse: Icons.security_outlined,
+      PropertyAmenity.cctv: Icons.videocam_outlined,
+      PropertyAmenity.electricFence: Icons.bolt_outlined,
+      PropertyAmenity.intercom: Icons.phone_callback_outlined,
+      // Water & Power
+      PropertyAmenity.borehole: Icons.water_drop_outlined,
+      PropertyAmenity.waterTank: Icons.propane_tank_outlined,
+      PropertyAmenity.generator: Icons.power_outlined,
+      PropertyAmenity.solar: Icons.solar_power_outlined,
+      // Connectivity
+      PropertyAmenity.fibre: Icons.wifi_outlined,
+      // Parking & Transport
+      PropertyAmenity.parking: Icons.local_parking_outlined,
+      PropertyAmenity.visitorParking: Icons.directions_car_outlined,
+      // Living & Comfort
+      PropertyAmenity.furnished: Icons.chair_outlined,
+      PropertyAmenity.airConditioning: Icons.ac_unit_outlined,
+      PropertyAmenity.pool: Icons.pool_outlined,
+      PropertyAmenity.gym: Icons.fitness_center_outlined,
+      // Outdoor & Community
+      PropertyAmenity.balcony: Icons.balcony_outlined,
+      PropertyAmenity.garden: Icons.yard_outlined,
+      PropertyAmenity.gatedCommunity: Icons.holiday_village_outlined,
+      PropertyAmenity.playArea: Icons.toys_outlined,
+      // Extra rooms
+      PropertyAmenity.dsq: Icons.home_work_outlined,
+      PropertyAmenity.elevator: Icons.elevator_outlined,
+      // Pet
+      PropertyAmenity.petFriendly: Icons.pets_outlined,
     };
 
     return GridView.builder(
@@ -615,7 +584,7 @@ class _PropertyDetailScreenState extends ConsumerState<PropertyDetailScreen>
       itemCount: PropertyAmenity.values.length,
       itemBuilder: (context, index) {
         final amenity = PropertyAmenity.values[index];
-        final data = amenityData[amenity]!;
+        final icon = amenityIcons[amenity] ?? Icons.check_circle_outline;
         final hasAmenity = property.amenities.contains(amenity);
 
         return Container(
@@ -635,19 +604,21 @@ class _PropertyDetailScreenState extends ConsumerState<PropertyDetailScreen>
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
               Icon(
-                data.$2,
+                icon,
                 size: 22,
-                color: hasAmenity ? AppTheme.primary : AppTheme.textTertiary,
+                color:
+                    hasAmenity ? AppTheme.primary : AppTheme.textTertiary,
               ),
               const SizedBox(height: 4),
               Text(
-                data.$1,
+                amenity.displayLabel,
                 style: TextStyle(
                   fontFamily: AppTheme.fontFamily,
                   fontSize: 11,
                   fontWeight: FontWeight.w500,
-                  color:
-                      hasAmenity ? AppTheme.primary : AppTheme.textTertiary,
+                  color: hasAmenity
+                      ? AppTheme.primary
+                      : AppTheme.textTertiary,
                 ),
                 textAlign: TextAlign.center,
               ),
@@ -715,8 +686,9 @@ class _PropertyDetailScreenState extends ConsumerState<PropertyDetailScreen>
                       Row(
                         children: [
                           Text(agent.displayName,
-                              style:
-                                  Theme.of(context).textTheme.titleLarge),
+                              style: Theme.of(context)
+                                  .textTheme
+                                  .titleLarge),
                           if (agent.isVerified) ...[
                             const SizedBox(width: 6),
                             const Icon(Icons.verified,
@@ -726,7 +698,8 @@ class _PropertyDetailScreenState extends ConsumerState<PropertyDetailScreen>
                       ),
                       if (agent.agency != null)
                         Text(agent.agency!,
-                            style: Theme.of(context).textTheme.bodySmall),
+                            style:
+                                Theme.of(context).textTheme.bodySmall),
                       const SizedBox(height: 4),
                       Row(
                         children: [
@@ -735,8 +708,9 @@ class _PropertyDetailScreenState extends ConsumerState<PropertyDetailScreen>
                           const SizedBox(width: 2),
                           Text(
                             '${agent.rating.toStringAsFixed(1)} (${agent.reviewCount} reviews)',
-                            style:
-                                Theme.of(context).textTheme.labelMedium,
+                            style: Theme.of(context)
+                                .textTheme
+                                .labelMedium,
                           ),
                         ],
                       ),
@@ -746,6 +720,8 @@ class _PropertyDetailScreenState extends ConsumerState<PropertyDetailScreen>
               ],
             ),
             const SizedBox(height: 16),
+
+            // ── Contact buttons ──────────────────────────────────────────
             Row(
               children: [
                 Expanded(
@@ -790,63 +766,6 @@ class _PropertyDetailScreenState extends ConsumerState<PropertyDetailScreen>
     final currentUser = ref.watch(currentUserProvider).value;
     final isOwnListing = currentUser?.id == property.agentId;
 
-    // ── Unavailable state ──────────────────────────────────────────────────
-    if (property.isUnavailable) {
-      return Container(
-        padding: const EdgeInsets.fromLTRB(20, 12, 20, 32),
-        decoration: BoxDecoration(
-          color: AppTheme.surface,
-          border:
-              Border(top: BorderSide(color: AppTheme.border, width: 0.5)),
-        ),
-        child: Row(
-          children: [
-            Container(
-              width: 44,
-              height: 44,
-              decoration: BoxDecoration(
-                color: _unavailableColor(property.status)
-                    .withValues(alpha: 0.1),
-                shape: BoxShape.circle,
-              ),
-              child: Icon(
-                property.status == PropertyStatus.rented
-                    ? Icons.key_off_outlined
-                    : Icons.sell_outlined,
-                color: _unavailableColor(property.status),
-                size: 22,
-              ),
-            ),
-            const SizedBox(width: 12),
-            Expanded(
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    property.status == PropertyStatus.rented
-                        ? 'This property has been rented'
-                        : 'This property has been sold',
-                    style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                          color: _unavailableColor(property.status),
-                          fontWeight: FontWeight.w700,
-                        ),
-                  ),
-                  Text(
-                    'It is no longer available for booking',
-                    style: Theme.of(context).textTheme.labelSmall?.copyWith(
-                          color: AppTheme.textSecondary,
-                        ),
-                  ),
-                ],
-              ),
-            ),
-          ],
-        ),
-      );
-    }
-
-    // ── Available state ────────────────────────────────────────────────────
     return Container(
       padding: const EdgeInsets.fromLTRB(20, 12, 20, 32),
       decoration: BoxDecoration(
@@ -1037,128 +956,6 @@ class _PropertyDetailScreenState extends ConsumerState<PropertyDetailScreen>
     );
   }
 
-  String _formatType(PropertyType type) =>
-      type.name[0].toUpperCase() + type.name.substring(1);
-
-  Color _unavailableColor(PropertyStatus status) {
-    if (status == PropertyStatus.rented) return const Color(0xFFF4511E);
-    if (status == PropertyStatus.sold) return const Color(0xFFE53935);
-    return AppTheme.textSecondary;
-  }
-}
-
-// ─── Unavailability Banner ────────────────────────────────────────────────────
-
-/// A prominent inline banner shown at the top of the detail content when a
-/// property is no longer available.
-class _UnavailabilityBanner extends StatelessWidget {
-  final PropertyStatus status;
-  const _UnavailabilityBanner({required this.status});
-
-  @override
-  Widget build(BuildContext context) {
-    final isSold = status == PropertyStatus.sold;
-    final color = isSold ? const Color(0xFFE53935) : const Color(0xFFF4511E);
-    final icon = isSold ? Icons.sell_outlined : Icons.key_off_outlined;
-    final title = isSold ? 'Property Sold' : 'Property Rented';
-    final subtitle = isSold
-        ? 'This property has been sold and is no longer available for viewing.'
-        : 'This property has been rented out and is no longer available.';
-
-    return Container(
-      padding: const EdgeInsets.all(14),
-      decoration: BoxDecoration(
-        color: color.withValues(alpha: 0.08),
-        borderRadius: BorderRadius.circular(AppTheme.radiusLG),
-        border: Border.all(color: color.withValues(alpha: 0.3)),
-      ),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Container(
-            width: 36,
-            height: 36,
-            decoration: BoxDecoration(
-              color: color.withValues(alpha: 0.15),
-              shape: BoxShape.circle,
-            ),
-            child: Icon(icon, color: color, size: 18),
-          ),
-          const SizedBox(width: 12),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  title,
-                  style: TextStyle(
-                    fontFamily: AppTheme.fontFamily,
-                    fontSize: 14,
-                    fontWeight: FontWeight.w700,
-                    color: color,
-                  ),
-                ),
-                const SizedBox(height: 2),
-                Text(
-                  subtitle,
-                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                        color: AppTheme.textSecondary,
-                      ),
-                ),
-              ],
-            ),
-          ),
-        ],
-      ),
-    ).animate().fadeIn(duration: 350.ms).slideY(begin: -0.05, end: 0);
-  }
-}
-
-// ─── Unavailable Image Stamp ──────────────────────────────────────────────────
-
-/// Diagonal "SOLD" / "RENTED" stamp displayed over the hero image.
-class _UnavailableStamp extends StatelessWidget {
-  final PropertyStatus status;
-  const _UnavailableStamp({required this.status});
-
-  @override
-  Widget build(BuildContext context) {
-    final isSold = status == PropertyStatus.sold;
-    final label = isSold ? 'SOLD' : 'RENTED';
-    final color = isSold ? const Color(0xFFE53935) : const Color(0xFFF4511E);
-
-    return Transform.rotate(
-      angle: -0.35, // ~20 degrees
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 32, vertical: 10),
-        decoration: BoxDecoration(
-          color: color,
-          borderRadius: BorderRadius.circular(4),
-          boxShadow: [
-            BoxShadow(
-              color: Colors.black.withValues(alpha: 0.3),
-              blurRadius: 12,
-              offset: const Offset(0, 4),
-            ),
-          ],
-        ),
-        child: Text(
-          label,
-          style: const TextStyle(
-            color: Colors.white,
-            fontSize: 28,
-            fontWeight: FontWeight.w900,
-            letterSpacing: 6,
-          ),
-        ),
-      ),
-    ).animate().fadeIn(duration: 400.ms).scale(
-          begin: const Offset(0.7, 0.7),
-          end: const Offset(1, 1),
-          duration: 400.ms,
-          curve: Curves.elasticOut,
-        );
-  }
 }
 
 // ─── Video Player ─────────────────────────────────────────────────────────────
@@ -1393,7 +1190,6 @@ class _PillOption extends StatelessWidget {
   Widget build(BuildContext context) {
     return GestureDetector(
       onTap: onTap,
-      behavior: HitTestBehavior.opaque,
       child: AnimatedContainer(
         duration: const Duration(milliseconds: 200),
         padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
@@ -1415,7 +1211,8 @@ class _PillOption extends StatelessWidget {
               style: TextStyle(
                 fontSize: 12,
                 fontWeight: FontWeight.w600,
-                color: isSelected ? AppTheme.textPrimary : Colors.white70,
+                color:
+                    isSelected ? AppTheme.textPrimary : Colors.white70,
               ),
             ),
           ],
@@ -1612,8 +1409,13 @@ class _BookingSheetState extends ConsumerState<BookingSheet> {
                 children: [
                   Text(
                     [
-                      'Mon', 'Tue', 'Wed', 'Thu',
-                      'Fri', 'Sat', 'Sun'
+                      'Mon',
+                      'Tue',
+                      'Wed',
+                      'Thu',
+                      'Fri',
+                      'Sat',
+                      'Sun'
                     ][date.weekday - 1],
                     style: TextStyle(
                       fontSize: 11,
@@ -1665,8 +1467,9 @@ class _BookingSheetState extends ConsumerState<BookingSheet> {
             padding:
                 const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
             decoration: BoxDecoration(
-              color:
-                  isSelected ? AppTheme.primary : AppTheme.surfaceVariant,
+              color: isSelected
+                  ? AppTheme.primary
+                  : AppTheme.surfaceVariant,
               borderRadius: BorderRadius.circular(AppTheme.radiusMD),
               border: Border.all(
                 color: isSelected ? AppTheme.primary : AppTheme.border,
@@ -1678,7 +1481,8 @@ class _BookingSheetState extends ConsumerState<BookingSheet> {
               style: TextStyle(
                 fontSize: 13,
                 fontWeight: FontWeight.w500,
-                color: isSelected ? Colors.white : AppTheme.textPrimary,
+                color:
+                    isSelected ? Colors.white : AppTheme.textPrimary,
               ),
             ),
           ),
@@ -1767,7 +1571,8 @@ class _CircleIconButton extends StatelessWidget {
           shape: BoxShape.circle,
           boxShadow: AppTheme.shadowSM,
         ),
-        child: Icon(icon, size: 20, color: iconColor ?? AppTheme.textPrimary),
+        child:
+            Icon(icon, size: 20, color: iconColor ?? AppTheme.textPrimary),
       ),
     );
   }

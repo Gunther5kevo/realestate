@@ -1,7 +1,7 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/foundation.dart';
 
-// ─── User Model ──────────────────────────────────────────────────────────────
+// ─── User Model ───────────────────────────────────────────────────────────────
 enum UserRole { user, agent, admin }
 
 class AppUser {
@@ -94,23 +94,66 @@ class AppUser {
       );
 }
 
-// ─── Property Model ──────────────────────────────────────────────────────────
-enum PropertyType { apartment, house, villa, commercial, land, studio }
-enum PropertyStatus { active, pending, sold, rented, suspended }
-enum ListingType { sale, rent }
-enum PropertyAmenity {
-  pool, gym, parking, security, balcony, garden, elevator,
-  wifi, airConditioning, furnished, petFriendly, waterfront
+// ─── Property Model ───────────────────────────────────────────────────────────
+
+enum PropertyType {
+  /// Bedsitter — single room with kitchenette, common in Nairobi rentals
+  bedsitter,
+  studio,
+  apartment,
+  maisonette,
+  bungalow,
+  house,
+  villa,
+  townhouse,
+  commercial,
+  land,
 }
 
-/// Returns true when a property is no longer available to book or purchase.
+/// Display label shown in the UI for each property type.
+extension PropertyTypeX on PropertyType {
+  String get displayLabel {
+    switch (this) {
+      case PropertyType.bedsitter:
+        return 'Bedsitter';
+      case PropertyType.studio:
+        return 'Studio';
+      case PropertyType.apartment:
+        return 'Apartment';
+      case PropertyType.maisonette:
+        return 'Maisonette';
+      case PropertyType.bungalow:
+        return 'Bungalow';
+      case PropertyType.house:
+        return 'House';
+      case PropertyType.villa:
+        return 'Villa';
+      case PropertyType.townhouse:
+        return 'Townhouse';
+      case PropertyType.commercial:
+        return 'Commercial';
+      case PropertyType.land:
+        return 'Land';
+    }
+  }
+
+  /// True when the type never has a bedroom count (e.g. land, commercial).
+  bool get hasNoBedrooms =>
+      this == PropertyType.land || this == PropertyType.commercial;
+
+  /// True when the type is always a single room (bedrooms field is irrelevant).
+  bool get isSingleRoom =>
+      this == PropertyType.bedsitter || this == PropertyType.studio;
+}
+
+enum PropertyStatus { active, pending, sold, rented, suspended }
+
 extension PropertyStatusX on PropertyStatus {
   bool get isUnavailable =>
       this == PropertyStatus.sold ||
       this == PropertyStatus.rented ||
       this == PropertyStatus.suspended;
 
-  /// Human-readable label shown in the UI.
   String get displayLabel {
     switch (this) {
       case PropertyStatus.sold:
@@ -126,23 +169,284 @@ extension PropertyStatusX on PropertyStatus {
     }
   }
 
-  /// Badge colour used throughout the UI.
-  /// Import `package:flutter/material.dart` where consumed.
   String get colorHex {
     switch (this) {
       case PropertyStatus.sold:
-        return '#E53935'; // red
+        return '#E53935';
       case PropertyStatus.rented:
-        return '#F4511E'; // deep-orange
+        return '#F4511E';
       case PropertyStatus.suspended:
-        return '#757575'; // grey
+        return '#757575';
       case PropertyStatus.pending:
-        return '#FB8C00'; // amber
+        return '#FB8C00';
       case PropertyStatus.active:
-        return '#43A047'; // green
+        return '#43A047';
     }
   }
 }
+
+enum ListingType { sale, rent }
+
+/// Kenya-relevant amenities.
+enum PropertyAmenity {
+  // ── Security & Access ──────────────────────────────────────────────────────
+  /// 24/7 security guards at the gate
+  guardhouse,
+
+  /// Closed-circuit TV cameras on premises
+  cctv,
+
+  /// Electric fence around the compound
+  electricFence,
+
+  /// Intercom / video intercom at the gate
+  intercom,
+
+  // ── Water & Power ──────────────────────────────────────────────────────────
+  /// Borehole water supply — very common selling point in Kenya
+  borehole,
+
+  /// Overhead or underground water storage tank
+  waterTank,
+
+  /// Backup diesel generator for power outages
+  generator,
+
+  /// Solar panels / solar water heater
+  solar,
+
+  // ── Connectivity ───────────────────────────────────────────────────────────
+  /// Fibre-optic internet connection available
+  fibre,
+
+  // ── Parking & Transport ────────────────────────────────────────────────────
+  /// Dedicated parking bay(s) in the compound
+  parking,
+
+  /// Ample visitor parking
+  visitorParking,
+
+  // ── Living & Comfort ───────────────────────────────────────────────────────
+  /// Fully furnished unit
+  furnished,
+
+  /// Air conditioning units installed
+  airConditioning,
+
+  /// Private or shared swimming pool
+  pool,
+
+  /// On-site gym / fitness centre
+  gym,
+
+  // ── Outdoor & Community ────────────────────────────────────────────────────
+  /// Private balcony or terrace
+  balcony,
+
+  /// Shared or private garden / compound garden
+  garden,
+
+  /// Gated estate with controlled access
+  gatedCommunity,
+
+  /// Children's play area within the compound
+  playArea,
+
+  // ── Extra Rooms ────────────────────────────────────────────────────────────
+  /// Domestic Staff Quarter — separate servant's room (DSQ)
+  dsq,
+
+  /// Lift / elevator (relevant for high-rise apartments)
+  elevator,
+
+  // ── Pet & Lifestyle ────────────────────────────────────────────────────────
+  petFriendly,
+}
+
+extension PropertyAmenityX on PropertyAmenity {
+  String get displayLabel {
+    switch (this) {
+      case PropertyAmenity.guardhouse:
+        return 'Guardhouse';
+      case PropertyAmenity.cctv:
+        return 'CCTV';
+      case PropertyAmenity.electricFence:
+        return 'Electric Fence';
+      case PropertyAmenity.intercom:
+        return 'Intercom';
+      case PropertyAmenity.borehole:
+        return 'Borehole';
+      case PropertyAmenity.waterTank:
+        return 'Water Tank';
+      case PropertyAmenity.generator:
+        return 'Generator';
+      case PropertyAmenity.solar:
+        return 'Solar';
+      case PropertyAmenity.fibre:
+        return 'Fibre Internet';
+      case PropertyAmenity.parking:
+        return 'Parking';
+      case PropertyAmenity.visitorParking:
+        return 'Visitor Parking';
+      case PropertyAmenity.furnished:
+        return 'Furnished';
+      case PropertyAmenity.airConditioning:
+        return 'Air Con';
+      case PropertyAmenity.pool:
+        return 'Pool';
+      case PropertyAmenity.gym:
+        return 'Gym';
+      case PropertyAmenity.balcony:
+        return 'Balcony';
+      case PropertyAmenity.garden:
+        return 'Garden';
+      case PropertyAmenity.gatedCommunity:
+        return 'Gated Estate';
+      case PropertyAmenity.playArea:
+        return 'Play Area';
+      case PropertyAmenity.dsq:
+        return 'DSQ';
+      case PropertyAmenity.elevator:
+        return 'Elevator';
+      case PropertyAmenity.petFriendly:
+        return 'Pet Friendly';
+    }
+  }
+}
+
+// ─── Kenyan location data ─────────────────────────────────────────────────────
+
+/// Counties and their major towns / neighbourhoods used in filter dropdowns.
+class KenyaLocations {
+  static const Map<String, List<String>> counties = {
+    'Nairobi': [
+      'Westlands',
+      'Kilimani',
+      'Kileleshwa',
+      'Lavington',
+      'Karen',
+      'Runda',
+      'Muthaiga',
+      'Gigiri',
+      'Parklands',
+      'Spring Valley',
+      'Loresho',
+      'Lower Kabete',
+      'Rosslyn',
+      "Lang'ata",
+      'South C',
+      'South B',
+      'Nairobi West',
+      'Industrial Area',
+      'Eastleigh',
+      'Kasarani',
+      'Roysambu',
+      'Thika Road',
+      'Ruiru',
+      'Githurai',
+      'Kahawa West',
+      'Embakasi',
+      'Donholm',
+      'Umoja',
+      'Buruburu',
+      'Dandora',
+      'Ongata Rongai',
+      'Kitengela',
+      'Syokimau',
+      'Athi River',
+      'Ngong',
+      'Kiserian',
+    ],
+    'Kiambu': [
+      'Ruaka',
+      'Kikuyu',
+      'Ndenderu',
+      'Limuru',
+      'Thika',
+      'Kiambu Town',
+      'Tigoni',
+      'Banana',
+      'Karuri',
+      'Githunguri',
+    ],
+    'Mombasa': [
+      'Nyali',
+      'Bamburi',
+      'Shanzu',
+      'Mtwapa',
+      'Diani',
+      'Likoni',
+      'Tudor',
+      'Kisauni',
+      'Changamwe',
+      'Mombasa CBD',
+    ],
+    'Nakuru': [
+      'Nakuru Town',
+      'Milimani',
+      'Section 58',
+      'London',
+      'Naivasha',
+      'Gilgil',
+    ],
+    'Kisumu': [
+      'Milimani',
+      'Nyalenda',
+      'Kisumu CBD',
+      'Riat Hills',
+      'Mamboleo',
+    ],
+    'Eldoret': [
+      'Eldoret CBD',
+      'Langas',
+      'Elgon View',
+      'West Indies',
+      'Pioneer',
+    ],
+    'Machakos': [
+      'Athi River',
+      'Syokimau',
+      'Mlolongo',
+      'Machakos Town',
+      'Mavoko',
+    ],
+    'Kajiado': [
+      'Kitengela',
+      'Ongata Rongai',
+      'Ngong',
+      'Kiserian',
+      'Namanga',
+    ],
+  };
+
+  static List<String> get allCounties => counties.keys.toList()..sort();
+
+  static List<String> neighbourhoodsFor(String county) =>
+      counties[county] ?? [];
+}
+
+// ─── Bedroom options ──────────────────────────────────────────────────────────
+
+/// Bedroom filter options shown in the filter sheet.
+/// null = Any, -1 = Bedsitter/Studio (0 bedrooms), 1–5 = actual count
+class BedroomOption {
+  final int? value; // null → Any, -1 → Bedsitter/Studio
+  final String label;
+
+  const BedroomOption({required this.value, required this.label});
+
+  static const List<BedroomOption> all = [
+    BedroomOption(value: null, label: 'Any'),
+    BedroomOption(value: -1, label: 'Bedsitter / Studio'),
+    BedroomOption(value: 1, label: '1 Bed'),
+    BedroomOption(value: 2, label: '2 Bed'),
+    BedroomOption(value: 3, label: '3 Bed'),
+    BedroomOption(value: 4, label: '4 Bed'),
+    BedroomOption(value: 5, label: '5+ Bed'),
+  ];
+}
+
+// ─── Property Location ────────────────────────────────────────────────────────
 
 class PropertyLocation {
   final double latitude;
@@ -191,6 +495,8 @@ class PropertyLocation {
 
   String get fullAddress => '$address, $city, $state';
 }
+
+// ─── Property ─────────────────────────────────────────────────────────────────
 
 class Property {
   final String id;
@@ -253,8 +559,10 @@ class Property {
     required this.updatedAt,
   });
 
-  /// Convenience: is this property no longer on the market?
   bool get isUnavailable => status.isUnavailable;
+
+  /// For bedsitters/studios the bedroom count is 0 or null — treat as single room.
+  bool get isSingleRoom => type.isSingleRoom || (bedrooms ?? 0) == 0;
 
   factory Property.fromFirestore(DocumentSnapshot doc) {
     final data = doc.data() as Map<String, dynamic>;
@@ -287,7 +595,7 @@ class Property {
       amenities: (data['amenities'] as List<dynamic>? ?? [])
           .map((a) => PropertyAmenity.values.firstWhere(
                 (pa) => pa.name == a,
-                orElse: () => PropertyAmenity.wifi,
+                orElse: () => PropertyAmenity.parking,
               ))
           .toList(),
       agentId: data['agentId'] ?? '',
@@ -344,10 +652,12 @@ class Property {
       location.city.toLowerCase(),
       location.state.toLowerCase(),
       type.name.toLowerCase(),
+      type.displayLabel.toLowerCase(),
       listingType.name.toLowerCase(),
-      if (listingType == ListingType.rent) 'rent rental',
+      if (listingType == ListingType.rent) 'rent rental to let',
       if (listingType == ListingType.sale) 'sale buy',
       if (bedrooms != null) '$bedrooms bedroom',
+      if (isSingleRoom) 'bedsitter studio single room',
       agentName?.toLowerCase() ?? '',
     ];
     return parts.where((p) => p.isNotEmpty).join(' ');
@@ -365,21 +675,25 @@ class Property {
       keywords.addAll(location.address.toLowerCase().split(' '));
     }
     keywords.add(type.name.toLowerCase());
+    keywords.add(type.displayLabel.toLowerCase());
     keywords.add(listingType.name.toLowerCase());
     if (listingType == ListingType.rent) {
       keywords.addAll(['rent', 'rental', 'to let', 'let']);
     } else {
       keywords.addAll(['sale', 'buy', 'purchase', 'for sale']);
     }
-    if (bedrooms != null) {
+    if (bedrooms != null && !isSingleRoom) {
       keywords.add('${bedrooms}bed');
       keywords.add('${bedrooms}bedroom');
       keywords.add('$bedrooms bed');
       keywords.add('$bedrooms bedroom');
     }
+    if (isSingleRoom) {
+      keywords.addAll(['bedsitter', 'bedsit', 'studio', 'single room', 'self contain']);
+    }
     if (price >= 100000000) keywords.add('luxury');
     if (price >= 50000000) keywords.addAll(['premium', 'highend']);
-    if (listingType == ListingType.rent && price <= 50000) {
+    if (listingType == ListingType.rent && price <= 20000) {
       keywords.add('affordable');
     }
     keywords.removeWhere((k) => k.length < 2);
@@ -399,9 +713,18 @@ class Property {
 
   String get priceLabel =>
       listingType == ListingType.rent ? '$formattedPrice/mo' : formattedPrice;
+
+  /// Short bedroom label used in cards: "Bedsitter", "Studio", "1 Bed", etc.
+  String get bedroomLabel {
+    if (type == PropertyType.bedsitter) return 'Bedsitter';
+    if (type == PropertyType.studio) return 'Studio';
+    if (bedrooms == null) return '';
+    if (bedrooms == 1) return '1 Bed';
+    return '$bedrooms Beds';
+  }
 }
 
-// ─── Booking Model ───────────────────────────────────────────────────────────
+// ─── Booking Model ────────────────────────────────────────────────────────────
 enum BookingType { viewing, reservation }
 enum BookingStatus { pending, confirmed, cancelled, completed }
 enum PaymentStatus { unpaid, paid, refunded }
@@ -525,7 +848,7 @@ class Booking {
       );
 }
 
-// ─── Transaction Model ───────────────────────────────────────────────────────
+// ─── Transaction Model ────────────────────────────────────────────────────────
 enum TransactionStatus { pending, processing, completed, failed, refunded }
 enum PaymentMethod { mpesa, stripe, card }
 
@@ -605,18 +928,26 @@ class Transaction {
       };
 }
 
-// ─── Search Filter Model ─────────────────────────────────────────────────────
+// ─── Search / Filter Model ────────────────────────────────────────────────────
+
 class PropertyFilter {
   final String? searchQuery;
   final PropertyType? type;
   final ListingType? listingType;
   final double? minPrice;
   final double? maxPrice;
+
+  /// Bedroom filter: null = any, -1 = bedsitter/studio, 1–5 = exact min count.
   final int? minBedrooms;
   final int? maxBedrooms;
   final int? minBathrooms;
   final double? minArea;
   final double? maxArea;
+
+  /// County / major city (e.g. "Nairobi", "Mombasa")
+  final String? county;
+
+  /// Neighbourhood within the county (e.g. "Kilimani", "Westlands")
   final String? city;
   final String? neighborhood;
   final List<PropertyAmenity> amenities;
@@ -637,6 +968,7 @@ class PropertyFilter {
     this.minBathrooms,
     this.minArea,
     this.maxArea,
+    this.county,
     this.city,
     this.neighborhood,
     this.amenities = const [],
@@ -658,6 +990,7 @@ class PropertyFilter {
     int? minBathrooms,
     double? minArea,
     double? maxArea,
+    String? county,
     String? city,
     String? neighborhood,
     List<PropertyAmenity>? amenities,
@@ -666,19 +999,29 @@ class PropertyFilter {
     double? radiusKm,
     double? centerLat,
     double? centerLng,
+    bool clearType = false,
+    bool clearListingType = false,
+    bool clearMinBedrooms = false,
+    bool clearCounty = false,
+    bool clearCity = false,
+    bool clearMinPrice = false,
+    bool clearMaxPrice = false,
   }) =>
       PropertyFilter(
         searchQuery: searchQuery ?? this.searchQuery,
-        type: type ?? this.type,
-        listingType: listingType ?? this.listingType,
-        minPrice: minPrice ?? this.minPrice,
-        maxPrice: maxPrice ?? this.maxPrice,
-        minBedrooms: minBedrooms ?? this.minBedrooms,
+        type: clearType ? null : type ?? this.type,
+        listingType:
+            clearListingType ? null : listingType ?? this.listingType,
+        minPrice: clearMinPrice ? null : minPrice ?? this.minPrice,
+        maxPrice: clearMaxPrice ? null : maxPrice ?? this.maxPrice,
+        minBedrooms:
+            clearMinBedrooms ? null : minBedrooms ?? this.minBedrooms,
         maxBedrooms: maxBedrooms ?? this.maxBedrooms,
         minBathrooms: minBathrooms ?? this.minBathrooms,
         minArea: minArea ?? this.minArea,
         maxArea: maxArea ?? this.maxArea,
-        city: city ?? this.city,
+        county: clearCounty ? null : county ?? this.county,
+        city: clearCity ? null : city ?? this.city,
         neighborhood: neighborhood ?? this.neighborhood,
         amenities: amenities ?? this.amenities,
         isFeatured: isFeatured ?? this.isFeatured,
@@ -688,16 +1031,33 @@ class PropertyFilter {
         centerLng: centerLng ?? this.centerLng,
       );
 
+  /// True when the person has applied a filter beyond the default Buy/Rent
+  /// toggle. listingType is intentionally excluded — it's controlled by
+  /// HomeScreen's Buy/Rent pill, not by the filter sheet, so it shouldn't
+  /// trigger the "Filtered" badge or count toward activeFilterCount.
   bool get hasActiveFilters =>
       type != null ||
       minPrice != null ||
       maxPrice != null ||
       minBedrooms != null ||
+      county != null ||
       city != null ||
+      neighborhood != null ||
       amenities.isNotEmpty;
+
+  int get activeFilterCount {
+    int count = 0;
+    if (type != null) count++;
+    if (minPrice != null || maxPrice != null) count++;
+    if (minBedrooms != null) count++;
+    if (county != null || city != null) count++;
+    if (amenities.isNotEmpty) count++;
+    return count;
+  }
 }
 
-// ─── Agent Profile ───────────────────────────────────────────────────────────
+// ─── Agent Profile ────────────────────────────────────────────────────────────
+
 class AgentProfile {
   final String userId;
   final String displayName;
@@ -806,7 +1166,8 @@ class MapFilter {
     bool clearPropertyType = false,
   }) {
     return MapFilter(
-      listingType: clearListingType ? null : listingType ?? this.listingType,
+      listingType:
+          clearListingType ? null : listingType ?? this.listingType,
       propertyType:
           clearPropertyType ? null : propertyType ?? this.propertyType,
     );

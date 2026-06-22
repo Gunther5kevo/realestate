@@ -19,7 +19,6 @@ class HomeScreen extends ConsumerStatefulWidget {
 }
 
 class _HomeScreenState extends ConsumerState<HomeScreen> {
-  ListingType _selectedListingType = ListingType.sale;
   final ScrollController _scrollController = ScrollController();
   bool _showAppBarTitle = false;
 
@@ -72,7 +71,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
     );
   }
 
-  // ─── App Bar ─────────────────────────────────────────────────────────────────
+  // ─── App Bar ──────────────────────────────────────────────────────────────
 
   Widget _buildSliverAppBar() {
     return SliverAppBar(
@@ -99,6 +98,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
       actions: [
         IconButton(
           icon: const Icon(Icons.notifications_outlined),
+          // /notifications is not a shell tab — push() is correct
           onPressed: () => context.push('/notifications'),
           color: AppTheme.textPrimary,
         ),
@@ -156,6 +156,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
     final userAsync = ref.watch(currentUserProvider);
 
     return GestureDetector(
+      // /profile is a shell tab — go() is correct
       onTap: () => context.go('/profile'),
       child: Container(
         width: 36,
@@ -165,7 +166,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
           shape: BoxShape.circle,
           color: AppTheme.primarySurface,
           border: Border.all(
-            color: AppTheme.primary.withOpacity(0.2),
+            color: AppTheme.primary.withValues(alpha: 0.2),
             width: 1.5,
           ),
         ),
@@ -181,7 +182,6 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
             color: AppTheme.primary,
           ),
           data: (user) {
-            // Show avatar photo if available
             if (user?.avatarUrl != null) {
               return ClipOval(
                 child: CachedNetworkImage(
@@ -200,7 +200,6 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                 ),
               );
             }
-            // Fall back to first initial
             final initial = user?.fullName.isNotEmpty == true
                 ? user!.fullName[0].toUpperCase()
                 : '?';
@@ -221,9 +220,11 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
     );
   }
 
-  // ─── Listing Type Toggle ──────────────────────────────────────────────────────
+  // ─── Listing Type Toggle ──────────────────────────────────────────────────
 
   Widget _buildListingTypeToggle(PropertyFilter filter) {
+    final effectiveType = filter.listingType ?? ListingType.sale;
+
     return Container(
       color: AppTheme.surface,
       padding: const EdgeInsets.fromLTRB(20, 0, 20, 16),
@@ -231,9 +232,8 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
         children: [
           _ToggleButton(
             label: 'Buy',
-            isSelected: _selectedListingType == ListingType.sale,
+            isSelected: effectiveType == ListingType.sale,
             onTap: () {
-              setState(() => _selectedListingType = ListingType.sale);
               ref.read(propertyFilterProvider.notifier).state =
                   filter.copyWith(listingType: ListingType.sale);
             },
@@ -241,9 +241,8 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
           const SizedBox(width: 8),
           _ToggleButton(
             label: 'Rent',
-            isSelected: _selectedListingType == ListingType.rent,
+            isSelected: effectiveType == ListingType.rent,
             onTap: () {
-              setState(() => _selectedListingType = ListingType.rent);
               ref.read(propertyFilterProvider.notifier).state =
                   filter.copyWith(listingType: ListingType.rent);
             },
@@ -253,24 +252,32 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
     );
   }
 
-  // ─── Search Row ───────────────────────────────────────────────────────────────
+  // ─── Search Row ───────────────────────────────────────────────────────────
 
   Widget _buildSearchRow(PropertyFilter filter) {
+    final effectiveType = filter.listingType ?? ListingType.sale;
+
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 8),
       child: Row(
         children: [
           Expanded(
             child: SearchBarWidget(
-              onTap: () => context.push('/search'),
-              hintText: _selectedListingType == ListingType.rent
-                  ? 'Search rental properties...'
+              // FIX: /search is a shell tab route — must use go(), not push().
+              // Deferred via postFrameCallback to avoid mid-build assertions.
+              onTap: () {
+                WidgetsBinding.instance.addPostFrameCallback((_) {
+                  if (context.mounted) context.go('/search');
+                });
+              },
+              hintText: effectiveType == ListingType.rent
+                  ? 'Search rentals in Eldoret...'
                   : 'Search properties for sale...',
             ),
           ),
           const SizedBox(width: 8),
-          // Map button
           GestureDetector(
+            // /map is not a shell tab — push() is correct
             onTap: () => context.push('/map'),
             child: Container(
               width: 48,
@@ -311,14 +318,11 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
     );
   }
 
-  // ─── Featured Section ─────────────────────────────────────────────────────────
-
-  // ─── Featured Section — hidden entirely when empty ───────────────────────────
+  // ─── Featured Section ─────────────────────────────────────────────────────
 
   Widget _buildFeaturedSection() {
     final featuredAsync = ref.watch(featuredPropertiesProvider);
 
-    // Don't render anything (no header, no blank space) until we know there's data
     return featuredAsync.when(
       loading: () => Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -369,7 +373,9 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                     ),
                     child: FeaturedPropertyCard(
                       property: property,
-                      onTap: () => context.push('/property/${property.id}'),
+                      // /property/:id is not a shell tab — push() is correct
+                      onTap: () =>
+                          context.push('/property/${property.id}'),
                     ).animate().fadeIn(
                           delay: Duration(milliseconds: index * 100),
                           duration: const Duration(milliseconds: 400),
@@ -392,7 +398,8 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
         children: [
           Text('Featured', style: Theme.of(context).textTheme.headlineMedium),
           TextButton(
-            onPressed: () => context.push('/search'),
+            // FIX: /search is a shell tab — go() is correct
+            onPressed: () => context.go('/search'),
             child: const Text('See all'),
           ),
         ],
@@ -400,7 +407,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
     );
   }
 
-  // ─── All Properties Grid ──────────────────────────────────────────────────────
+  // ─── All Properties Grid ──────────────────────────────────────────────────
 
   Widget _buildSectionHeader(PropertyFilter filter) {
     return Padding(
@@ -413,7 +420,8 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
             style: Theme.of(context).textTheme.headlineMedium,
           ),
           Container(
-            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+            padding:
+                const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
             decoration: BoxDecoration(
               color: AppTheme.primarySurface,
               borderRadius: BorderRadius.circular(AppTheme.radiusFull),
@@ -464,11 +472,8 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
           padding: const EdgeInsets.all(40),
           child: Column(
             children: [
-              const Icon(
-                Icons.error_outline,
-                size: 48,
-                color: AppTheme.textTertiary,
-              ),
+              const Icon(Icons.error_outline,
+                  size: 48, color: AppTheme.textTertiary),
               const SizedBox(height: 12),
               Text(
                 'Could not load properties',
@@ -478,7 +483,8 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
               ),
               const SizedBox(height: 12),
               TextButton(
-                onPressed: () => ref.invalidate(propertiesProvider(filter)),
+                onPressed: () =>
+                    ref.invalidate(propertiesProvider(filter)),
                 child: const Text('Try again'),
               ),
             ],
@@ -492,11 +498,8 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
               padding: const EdgeInsets.all(40),
               child: Column(
                 children: [
-                  const Icon(
-                    Icons.home_outlined,
-                    size: 64,
-                    color: AppTheme.textTertiary,
-                  ),
+                  const Icon(Icons.home_outlined,
+                      size: 64, color: AppTheme.textTertiary),
                   const SizedBox(height: 16),
                   Text(
                     'No properties found',
@@ -526,7 +529,9 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                 final property = properties[index];
                 return PropertyCard(
                   property: property,
-                  onTap: () => context.push('/property/${property.id}'),
+                  // /property/:id is not a shell tab — push() is correct
+                  onTap: () =>
+                      context.push('/property/${property.id}'),
                 )
                     .animate()
                     .fadeIn(
@@ -580,7 +585,9 @@ class _ToggleButton extends StatelessWidget {
             fontFamily: AppTheme.fontFamily,
             fontSize: 14,
             fontWeight: FontWeight.w600,
-            color: isSelected ? AppTheme.textOnPrimary : AppTheme.textSecondary,
+            color: isSelected
+                ? AppTheme.textOnPrimary
+                : AppTheme.textSecondary,
           ),
         ),
       ),
@@ -592,7 +599,8 @@ class _FilterButton extends StatelessWidget {
   final bool hasActiveFilters;
   final VoidCallback onTap;
 
-  const _FilterButton({required this.hasActiveFilters, required this.onTap});
+  const _FilterButton(
+      {required this.hasActiveFilters, required this.onTap});
 
   @override
   Widget build(BuildContext context) {
@@ -602,10 +610,13 @@ class _FilterButton extends StatelessWidget {
         width: 48,
         height: 48,
         decoration: BoxDecoration(
-          color: hasActiveFilters ? AppTheme.primary : AppTheme.surfaceVariant,
+          color: hasActiveFilters
+              ? AppTheme.primary
+              : AppTheme.surfaceVariant,
           borderRadius: BorderRadius.circular(AppTheme.radiusMD),
           border: Border.all(
-            color: hasActiveFilters ? AppTheme.primary : AppTheme.border,
+            color:
+                hasActiveFilters ? AppTheme.primary : AppTheme.border,
             width: 0.5,
           ),
         ),
@@ -695,7 +706,7 @@ class FeaturedPropertyCard extends StatelessWidget {
                       end: Alignment.bottomCenter,
                       colors: [
                         Colors.transparent,
-                        Colors.black.withOpacity(0.7),
+                        Colors.black.withValues(alpha: 0.7),
                       ],
                       stops: const [0.4, 1.0],
                     ),
@@ -709,12 +720,11 @@ class FeaturedPropertyCard extends StatelessWidget {
                 left: 12,
                 child: Container(
                   padding: const EdgeInsets.symmetric(
-                    horizontal: 10,
-                    vertical: 5,
-                  ),
+                      horizontal: 10, vertical: 5),
                   decoration: BoxDecoration(
                     color: AppTheme.accent,
-                    borderRadius: BorderRadius.circular(AppTheme.radiusFull),
+                    borderRadius:
+                        BorderRadius.circular(AppTheme.radiusFull),
                   ),
                   child: const Text(
                     'Featured',
@@ -735,7 +745,7 @@ class FeaturedPropertyCard extends StatelessWidget {
                   width: 36,
                   height: 36,
                   decoration: BoxDecoration(
-                    color: Colors.white.withOpacity(0.9),
+                    color: Colors.white.withValues(alpha: 0.9),
                     shape: BoxShape.circle,
                   ),
                   child: const Icon(
@@ -779,11 +789,8 @@ class FeaturedPropertyCard extends StatelessWidget {
                       const SizedBox(height: 4),
                       Row(
                         children: [
-                          const Icon(
-                            Icons.location_on,
-                            color: Colors.white70,
-                            size: 12,
-                          ),
+                          const Icon(Icons.location_on,
+                              color: Colors.white70, size: 12),
                           const SizedBox(width: 4),
                           Text(
                             property.location.neighborhood ??

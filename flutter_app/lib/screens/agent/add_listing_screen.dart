@@ -296,8 +296,10 @@ class _AddListingScreenState extends ConsumerState<AddListingScreen> {
           runSpacing: 8,
           children: PropertyType.values
               .map((t) => _ChoiceChip(
-                    label:
-                        t.name[0].toUpperCase() + t.name.substring(1),
+                    // Uses the displayLabel extension so labels match the
+                    // filter sheet exactly (e.g. "Bedsitter", not "Bedsitter"
+                    // mangled, and proper spacing for multi-word types).
+                    label: t.displayLabel,
                     isSelected: _type == t,
                     onTap: () => setState(() => _type = t),
                   ))
@@ -335,6 +337,9 @@ class _AddListingScreenState extends ConsumerState<AddListingScreen> {
   // ─── Step 1: Property Details ─────────────────────────────────────────────
 
   Widget _buildStep1() {
+    // Single-room types (bedsitter/studio) don't need a bedroom count field.
+    final showBedrooms = !_type.isSingleRoom;
+
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -372,16 +377,17 @@ class _AddListingScreenState extends ConsumerState<AddListingScreen> {
         const SizedBox(height: 16),
         Row(
           children: [
-            Expanded(
-              child: TextFormField(
-                controller: _bedroomsController,
-                keyboardType: TextInputType.number,
-                decoration: const InputDecoration(
-                    labelText: 'Bedrooms',
-                    prefixIcon: Icon(Icons.bed_outlined)),
+            if (showBedrooms)
+              Expanded(
+                child: TextFormField(
+                  controller: _bedroomsController,
+                  keyboardType: TextInputType.number,
+                  decoration: const InputDecoration(
+                      labelText: 'Bedrooms',
+                      prefixIcon: Icon(Icons.bed_outlined)),
+                ),
               ),
-            ),
-            const SizedBox(width: 12),
+            if (showBedrooms) const SizedBox(width: 12),
             Expanded(
               child: TextFormField(
                 controller: _bathroomsController,
@@ -430,7 +436,10 @@ class _AddListingScreenState extends ConsumerState<AddListingScreen> {
                       width: 0.5),
                 ),
                 child: Text(
-                  a.name[0].toUpperCase() + a.name.substring(1),
+                  // displayLabel extension renders proper spacing for
+                  // camelCase enum values (e.g. "Gated Estate" instead of
+                  // "GatedCommunity", "Pet Friendly" instead of "PetFriendly").
+                  a.displayLabel,
                   style: TextStyle(
                       fontSize: 12,
                       fontWeight: FontWeight.w500,
@@ -623,18 +632,19 @@ class _AddListingScreenState extends ConsumerState<AddListingScreen> {
         _ReviewRow(label: 'Title', value: _titleController.text),
         _ReviewRow(
             label: 'Type',
-            value: '${_type.name} · ${_listingType.name}'),
+            value: '${_type.displayLabel} · ${_listingType == ListingType.rent ? 'Rent' : 'Sale'}'),
         _ReviewRow(
             label: 'Price', value: 'KES ${_priceController.text}'),
         _ReviewRow(
             label: 'Location',
             value:
                 '${_addressController.text}, ${_cityController.text}'),
-        _ReviewRow(
-            label: 'Bedrooms',
-            value: _bedroomsController.text.isNotEmpty
-                ? _bedroomsController.text
-                : 'N/A'),
+        if (!_type.isSingleRoom)
+          _ReviewRow(
+              label: 'Bedrooms',
+              value: _bedroomsController.text.isNotEmpty
+                  ? _bedroomsController.text
+                  : 'N/A'),
         _ReviewRow(
             label: 'Photos', value: '$totalImages uploaded'),
         _ReviewRow(
@@ -646,7 +656,9 @@ class _AddListingScreenState extends ConsumerState<AddListingScreen> {
             label: 'Amenities',
             value: _amenities.isEmpty
                 ? 'None'
-                : _amenities.map((a) => a.name).join(', ')),
+                // displayLabel keeps this human-readable: "Borehole, Generator,
+                // Pet Friendly" instead of "borehole, generator, petFriendly".
+                : _amenities.map((a) => a.displayLabel).join(', ')),
         const SizedBox(height: 16),
         if (!_isEditMode)
           Container(
@@ -804,6 +816,13 @@ class _AddListingScreenState extends ConsumerState<AddListingScreen> {
         ...addressPrefixes,
       }.toList();
 
+      // For single-room types (bedsitter/studio) force bedrooms to 0 so
+      // downstream bedroom-count filters and isSingleRoom logic stay correct
+      // even if the field was left blank or stale from a previous edit.
+      final bedroomsValue = _type.isSingleRoom
+          ? 0
+          : int.tryParse(_bedroomsController.text);
+
       if (_isEditMode) {
         // ── Edit: patch only changed fields ──────────────────────────
         final updates = <String, dynamic>{
@@ -820,7 +839,7 @@ class _AddListingScreenState extends ConsumerState<AddListingScreen> {
             'state': _state,
             'country': _country,
           },
-          'bedrooms': int.tryParse(_bedroomsController.text),
+          'bedrooms': bedroomsValue,
           'bathrooms': int.tryParse(_bathroomsController.text),
           'areaSqFt': double.tryParse(_areaController.text),
           'amenities': _amenities.map((a) => a.name).toList(),
@@ -881,7 +900,7 @@ class _AddListingScreenState extends ConsumerState<AddListingScreen> {
             state: _state,
             country: _country,
           ),
-          bedrooms: int.tryParse(_bedroomsController.text),
+          bedrooms: bedroomsValue,
           bathrooms: int.tryParse(_bathroomsController.text),
           areaSqFt: double.tryParse(_areaController.text),
           amenities: _amenities,

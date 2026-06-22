@@ -41,7 +41,7 @@ class AgentProfileScreen extends ConsumerWidget {
                       const SizedBox(height: 56),
                       CircleAvatar(
                         radius: 40,
-                        backgroundColor: Colors.white.withOpacity(0.2),
+                        backgroundColor: Colors.white.withValues(alpha: 0.2),
                         backgroundImage: agent.avatarUrl != null
                             ? NetworkImage(agent.avatarUrl!)
                             : null,

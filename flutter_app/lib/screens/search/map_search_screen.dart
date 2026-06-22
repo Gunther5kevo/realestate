@@ -7,6 +7,9 @@ import '../../core/theme/app_theme.dart';
 import '../../core/models/models.dart';
 import '../../core/providers/providers.dart';
 
+// Shell tab routes — must always use context.go(), never context.push()
+const _kShellRoutes = {'/home', '/search', '/saved', '/bookings', '/profile'};
+
 class MapSearchScreen extends ConsumerStatefulWidget {
   final Property? initialProperty;
   const MapSearchScreen({super.key, this.initialProperty});
@@ -21,7 +24,7 @@ class _MapSearchScreenState extends ConsumerState<MapSearchScreen> {
   Property? _selectedProperty;
   bool _isLoadingLocation = false;
 
-  static const LatLng _nairobiCenter = LatLng(-1.286389, 36.817223);
+  static const LatLng _eldoretCenter = LatLng(0.5200, 35.2697);
 
   BitmapDescriptor _saleIcon = BitmapDescriptor.defaultMarkerWithHue(
     BitmapDescriptor.hueAzure,
@@ -36,18 +39,18 @@ class _MapSearchScreenState extends ConsumerState<MapSearchScreen> {
     _loadMarkerIcons();
     if (widget.initialProperty != null) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
-        setState(() => _selectedProperty = widget.initialProperty);
+        if (mounted) setState(() => _selectedProperty = widget.initialProperty);
       });
     }
   }
 
   Future<void> _loadMarkerIcons() async {
-    _saleIcon = BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueAzure);
-    _rentIcon = BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueGreen);
+    _saleIcon =
+        BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueAzure);
+    _rentIcon =
+        BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueGreen);
   }
 
-  // Called every time the camera finishes moving — updates bounds only,
-  // filters are handled separately via mapFilterProvider
   Future<void> _onCameraIdle() async {
     if (_mapController == null) return;
     final bounds = await _mapController!.getVisibleRegion();
@@ -97,12 +100,23 @@ class _MapSearchScreenState extends ConsumerState<MapSearchScreen> {
     );
   }
 
+  /// Navigation helper that correctly uses go() for shell tab routes
+  /// and push() for all other routes, deferred to after the current frame.
+  void _navigate(String route) {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      if (_kShellRoutes.contains(route)) {
+        context.go(route);
+      } else {
+        context.push(route);
+      }
+    });
+  }
+
   @override
   Widget build(BuildContext context) {
-    // Watch the current filter state to drive chip selection UI
     final activeFilter = ref.watch(mapFilterProvider);
 
-    // React to bound/filter changes and rebuild markers
     ref.listen<AsyncValue<List<Property>>>(mapPropertiesProvider, (_, next) {
       next.whenData(_rebuildMarkers);
     });
@@ -118,12 +132,14 @@ class _MapSearchScreenState extends ConsumerState<MapSearchScreen> {
                       widget.initialProperty!.location.latitude,
                       widget.initialProperty!.location.longitude,
                     )
-                  : _nairobiCenter,
-              zoom: widget.initialProperty != null ? 15 : 12,
+                  : _eldoretCenter,
+              zoom: widget.initialProperty != null ? 15 : 13,
             ),
             onMapCreated: (controller) {
               _mapController = controller;
-              _onCameraIdle();
+              WidgetsBinding.instance.addPostFrameCallback((_) {
+                if (mounted) _onCameraIdle();
+              });
             },
             onCameraIdle: _onCameraIdle,
             markers: _markers,
@@ -136,12 +152,12 @@ class _MapSearchScreenState extends ConsumerState<MapSearchScreen> {
             ),
           ),
 
-          // ── Loading indicator ─────────────────────────────────────────
+          // ── Loading indicator ────────────────────────────────────────────
           _MapLoadingOverlay(
             isLoading: ref.watch(mapPropertiesProvider).isLoading,
           ),
 
-          // ── Top bar ───────────────────────────────────────────────────
+          // ── Top bar ──────────────────────────────────────────────────────
           SafeArea(
             child: Column(
               children: [
@@ -156,27 +172,32 @@ class _MapSearchScreenState extends ConsumerState<MapSearchScreen> {
                       const SizedBox(width: 12),
                       Expanded(
                         child: GestureDetector(
-                          onTap: () => context.push('/search'),
+                          // FIX: _navigate uses go() for shell tab routes,
+                          // preventing the duplicate page key crash.
+                          onTap: () => _navigate('/search'),
                           child: Container(
                             height: 44,
-                            padding: const EdgeInsets.symmetric(horizontal: 16),
+                            padding:
+                                const EdgeInsets.symmetric(horizontal: 16),
                             decoration: BoxDecoration(
                               color: AppTheme.surface,
-                              borderRadius:
-                                  BorderRadius.circular(AppTheme.radiusFull),
+                              borderRadius: BorderRadius.circular(
+                                  AppTheme.radiusFull),
                               boxShadow: AppTheme.shadowMD,
                             ),
                             child: Row(
                               children: [
                                 const Icon(Icons.search,
-                                    size: 18, color: AppTheme.textSecondary),
+                                    size: 18,
+                                    color: AppTheme.textSecondary),
                                 const SizedBox(width: 8),
                                 Text(
                                   'Search this area',
                                   style: Theme.of(context)
                                       .textTheme
                                       .bodyMedium
-                                      ?.copyWith(color: AppTheme.textSecondary),
+                                      ?.copyWith(
+                                          color: AppTheme.textSecondary),
                                 ),
                               ],
                             ),
@@ -187,14 +208,13 @@ class _MapSearchScreenState extends ConsumerState<MapSearchScreen> {
                   ),
                 ),
 
-                // ── Filter chips ───────────────────────────────────────
+                // ── Filter chips ────────────────────────────────────────
                 const SizedBox(height: 10),
                 SingleChildScrollView(
                   scrollDirection: Axis.horizontal,
                   padding: const EdgeInsets.symmetric(horizontal: 16),
                   child: Row(
                     children: [
-                      // Listing type filters
                       _FilterChip(
                         label: 'All',
                         isSelected: activeFilter.listingType == null,
@@ -203,22 +223,22 @@ class _MapSearchScreenState extends ConsumerState<MapSearchScreen> {
                       const SizedBox(width: 8),
                       _FilterChip(
                         label: 'For Sale',
-                        isSelected: activeFilter.listingType == ListingType.sale,
+                        isSelected:
+                            activeFilter.listingType == ListingType.sale,
                         onTap: () => _setListingFilter(ListingType.sale),
                       ),
                       const SizedBox(width: 8),
                       _FilterChip(
                         label: 'For Rent',
-                        isSelected: activeFilter.listingType == ListingType.rent,
+                        isSelected:
+                            activeFilter.listingType == ListingType.rent,
                         onTap: () => _setListingFilter(ListingType.rent),
                       ),
                       const SizedBox(width: 8),
-
-                      // Property type filters
                       ...PropertyType.values.map((t) => Padding(
                             padding: const EdgeInsets.only(right: 8),
                             child: _FilterChip(
-                              label: t.name[0].toUpperCase() + t.name.substring(1),
+                              label: t.displayLabel,
                               isSelected: activeFilter.propertyType == t,
                               onTap: () => _togglePropertyTypeFilter(t),
                             ),
@@ -230,7 +250,7 @@ class _MapSearchScreenState extends ConsumerState<MapSearchScreen> {
             ),
           ),
 
-          // ── My Location button ─────────────────────────────────────────
+          // ── My Location button ──────────────────────────────────────────
           Positioned(
             right: 16,
             bottom: _selectedProperty != null ? 240 : 24,
@@ -242,7 +262,7 @@ class _MapSearchScreenState extends ConsumerState<MapSearchScreen> {
             ),
           ),
 
-          // ── Legend ─────────────────────────────────────────────────────
+          // ── Legend ──────────────────────────────────────────────────────
           Positioned(
             left: 16,
             bottom: _selectedProperty != null ? 240 : 24,
@@ -265,7 +285,7 @@ class _MapSearchScreenState extends ConsumerState<MapSearchScreen> {
             ),
           ),
 
-          // ── Property preview card ──────────────────────────────────────
+          // ── Property preview card ───────────────────────────────────────
           if (_selectedProperty != null)
             Positioned(
               bottom: 0,
@@ -364,10 +384,10 @@ class _MapSearchScreenState extends ConsumerState<MapSearchScreen> {
             ),
           ),
 
-          // Navigate to detail
+          // Navigate to detail — non-shell route, push() is correct
           IconButton(
             icon: const Icon(Icons.arrow_forward_ios, size: 18),
-            onPressed: () => context.push('/property/${property.id}'),
+            onPressed: () => _navigate('/property/${property.id}'),
           ),
         ],
       ),

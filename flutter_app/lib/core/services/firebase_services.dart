@@ -87,7 +87,6 @@ class AuthService {
       await _auth.currentUser!.updateDisplayName(fullName);
     }
 
-    // Keep agent profile in sync if the user is an agent.
     final userDoc = await _db.collection('users').doc(uid).get();
     final role = userDoc.data()?['role'];
     if (role == 'agent') {
@@ -151,13 +150,25 @@ class PropertyService {
     if (filter.type != null) {
       query = query.where('type', isEqualTo: filter.type!.name);
     }
+
+    // Location filters — county maps to location.state in Firestore
+    if (filter.county != null) {
+      query =
+          query.where('location.state', isEqualTo: filter.county);
+    }
     if (filter.city != null) {
       query = query.where('location.city', isEqualTo: filter.city);
     }
-    if (filter.minBedrooms != null) {
-      query = query.where('bedrooms',
-          isGreaterThanOrEqualTo: filter.minBedrooms);
+
+    // Bedroom filter: -1 = bedsitter/studio (post-filtered), else normal range
+    if (filter.minBedrooms != null && filter.minBedrooms! > 0) {
+      if (filter.minBedrooms! < 5) {
+        query = query.where('bedrooms',
+            isGreaterThanOrEqualTo: filter.minBedrooms);
+      }
+      // 5+ — no upper bound needed, Firestore will return 5 and above
     }
+
     if (filter.isFeatured == true) {
       query = query.where('isFeatured', isEqualTo: true);
     }
@@ -183,6 +194,9 @@ class PropertyService {
     return snapshot.docs
         .map((doc) => Property.fromFirestore(doc))
         .where((p) {
+          // Bedsitter / Studio post-filter
+          if (filter.minBedrooms == -1 && !p.isSingleRoom) return false;
+
           if (filter.minPrice != null && p.price < filter.minPrice!) {
             return false;
           }
@@ -239,12 +253,19 @@ class PropertyService {
     if (filter.type != null) {
       q = q.where('type', isEqualTo: filter.type!.name);
     }
+    if (filter.county != null) {
+      q = q.where('location.state', isEqualTo: filter.county);
+    }
+    if (filter.city != null) {
+      q = q.where('location.city', isEqualTo: filter.city);
+    }
 
     final snapshot = await q.limit(30).get();
 
     return snapshot.docs
         .map((doc) => Property.fromFirestore(doc))
         .where((p) {
+          if (filter.minBedrooms == -1 && !p.isSingleRoom) return false;
           if (filter.minPrice != null && p.price < filter.minPrice!) {
             return false;
           }
@@ -252,6 +273,7 @@ class PropertyService {
             return false;
           }
           if (filter.minBedrooms != null &&
+              filter.minBedrooms! > 0 &&
               (p.bedrooms ?? 0) < filter.minBedrooms!) {
             return false;
           }
@@ -320,8 +342,6 @@ class PropertyService {
         .toList();
   }
 
-  /// Creates a property, auto-populating agentName and agentPhone from the
-  /// agent's profile if the caller didn't supply them.
   Future<String> createProperty(Property property) async {
     String agentName = property.agentName ?? '';
     String agentPhone = property.agentPhone ?? '';
@@ -342,7 +362,6 @@ class PropertyService {
 
     final docRef = await _db.collection('properties').add(data);
 
-    // Increment the agent's totalListings counter.
     await _db.collection('agents').doc(property.agentId).update({
       'totalListings': FieldValue.increment(1),
       'updatedAt': FieldValue.serverTimestamp(),
@@ -358,7 +377,6 @@ class PropertyService {
   }
 
   Future<void> deleteProperty(String id) async {
-    // Decrement the agent's totalListings counter before deleting.
     final doc = await _db.collection('properties').doc(id).get();
     if (doc.exists) {
       final agentId = doc.data()?['agentId'] as String?;
@@ -431,24 +449,10 @@ class PropertyService {
 }
 
 // ─── Booking Service ──────────────────────────────────────────────────────────
-//
-// IMPORTANT: Bookings are created AFTER payment is confirmed.
-// The flow is:
-//   BookingSheet → PaymentScreen → (payment success) → createBooking
-//
-// createBooking requires paymentStatus == PaymentStatus.paid.
-// The agent is only notified once payment is confirmed.
-//
-// STATUS → PROPERTY STATUS MAPPING
-// When an agent marks a booking as `completed` the property is automatically
-// transitioned to either `sold` (sale listing) or `rented` (rent listing).
-// All other pending/confirmed bookings for the same property are cancelled.
-
 class BookingService {
   final FirebaseFirestore _db = FirebaseFirestore.instance;
   final FirebaseAuth _auth = FirebaseAuth.instance;
 
-  /// Creates a booking. Should only be called after payment is confirmed.
   Future<String> createBooking(Booking booking) async {
     final uid = _auth.currentUser?.uid;
     if (uid == null) throw Exception('User not authenticated');
@@ -467,10 +471,7 @@ class BookingService {
     }
 
     final data = booking
-        .copyWith(
-          userId: userId,
-          userFullName: userFullName,
-        )
+        .copyWith(userId: userId, userFullName: userFullName)
         .toMap();
 
     data['createdAt'] = FieldValue.serverTimestamp();
@@ -491,7 +492,6 @@ class BookingService {
     return ref.id;
   }
 
-  /// Returns an active booking for the given user and property, or null.
   Future<Booking?> getActiveBookingForProperty({
     required String userId,
     required String propertyId,
@@ -528,17 +528,6 @@ class BookingService {
             snap.docs.map((d) => Booking.fromFirestore(d)).toList());
   }
 
-  /// Updates a booking's status.
-  ///
-  /// When [status] is [BookingStatus.completed]:
-  ///   1. The booking document is marked completed.
-  ///   2. The linked property is marked `sold` or `rented` depending on its
-  ///      [ListingType] — all inside a single Firestore batch so the two
-  ///      writes are atomic.
-  ///   3. Every other pending/confirmed booking for that property is
-  ///      cancelled (with reason "Property no longer available") so no other
-  ///      client sees stale availability.
-  ///   4. The agent's `soldCount` counter is incremented.
   Future<void> updateBookingStatus(
     String bookingId,
     BookingStatus status, {
@@ -556,8 +545,6 @@ class BookingService {
     }
   }
 
-  /// Internal: atomically completes the booking and marks the property
-  /// as sold/rented.
   Future<void> _completeBookingAndCloseProperty(String bookingId) async {
     final bookingDoc =
         await _db.collection('bookings').doc(bookingId).get();
@@ -753,7 +740,6 @@ class AgentService {
       'updatedAt': FieldValue.serverTimestamp(),
     });
 
-    // Keep the users doc display fields in sync.
     final userUpdates = <String, dynamic>{
       'updatedAt': FieldValue.serverTimestamp(),
       if (data['displayName'] != null) 'fullName': data['displayName'],
@@ -847,7 +833,6 @@ class AdminService {
       final data = userDoc.data() as Map<String, dynamic>;
 
       if (!agentDoc.exists) {
-        // First-time promotion: create a fully populated agent profile.
         batch.set(_db.collection('agents').doc(userId), {
           'displayName': data['fullName'] ?? '',
           'email': data['email'] ?? '',
@@ -867,8 +852,6 @@ class AdminService {
           'memberSince': FieldValue.serverTimestamp(),
         });
       } else {
-        // Agent doc exists (e.g. role was removed and re-added): backfill
-        // any fields that are missing or empty from the users doc.
         final existing = agentDoc.data() as Map<String, dynamic>;
         final patch = <String, dynamic>{
           'updatedAt': FieldValue.serverTimestamp(),

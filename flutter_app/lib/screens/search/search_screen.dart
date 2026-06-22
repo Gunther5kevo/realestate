@@ -9,8 +9,6 @@ import '../../widgets/property_card.dart';
 import '../../widgets/filter_sheet.dart';
 
 // ─── Local scoped provider for search screen ──────────────────────────────────
-// Separate from home's propertyFilterProvider — resets when screen is disposed
-
 class _SearchParams {
   final String query;
   final PropertyFilter filter;
@@ -44,6 +42,7 @@ class SearchScreen extends ConsumerStatefulWidget {
 
 class _SearchScreenState extends ConsumerState<SearchScreen> {
   final _searchController = TextEditingController();
+  final _focusNode = FocusNode();
   PropertyFilter _filter = const PropertyFilter();
   String _query = '';
 
@@ -56,11 +55,16 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
         setState(() => _query = text);
       }
     });
+    // Request focus after the frame is fully built to avoid assertion errors
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) _focusNode.requestFocus();
+    });
   }
 
   @override
   void dispose() {
     _searchController.dispose();
+    _focusNode.dispose();
     super.dispose();
   }
 
@@ -98,11 +102,14 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
       backgroundColor: AppTheme.surface,
       leading: IconButton(
         icon: const Icon(Icons.arrow_back),
+        // FIX: back from search could go to home (shell tab) or a non-shell
+        // screen. context.pop() is safe here — GoRouter pops to wherever
+        // we came from without creating new pages.
         onPressed: () => context.pop(),
       ),
       title: TextField(
         controller: _searchController,
-        autofocus: true,
+        focusNode: _focusNode,
         style: Theme.of(context).textTheme.bodyLarge,
         decoration: InputDecoration(
           hintText: 'Search by location, property name...',
@@ -166,18 +173,17 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
             ),
           if (_filter.type != null)
             _ActiveFilterChip(
-              label: _filter.type!.name[0].toUpperCase() +
-                  _filter.type!.name.substring(1),
+              label: _filter.type!.displayLabel,
               onRemove: () =>
-                  setState(() => _filter = _filter.copyWith(type: null)),
+                  setState(() => _filter = _filter.copyWith(clearType: true)),
             ),
           if (_filter.minPrice != null || _filter.maxPrice != null)
             _ActiveFilterChip(
               label: 'Price range',
               onRemove: () => setState(
                 () => _filter = _filter.copyWith(
-                  minPrice: null,
-                  maxPrice: null,
+                  clearMinPrice: true,
+                  clearMaxPrice: true,
                 ),
               ),
             ),
@@ -185,7 +191,7 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
             _ActiveFilterChip(
               label: '${_filter.minBedrooms}+ beds',
               onRemove: () => setState(
-                () => _filter = _filter.copyWith(minBedrooms: null),
+                () => _filter = _filter.copyWith(clearMinBedrooms: true),
               ),
             ),
         ],
@@ -223,7 +229,7 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
             ),
             const SizedBox(height: 8),
             Text(
-              'Try "Westlands apartment",\n"Karen villa" or "2 bedroom Kilimani"',
+              'Try "Elgon View apartment",\n"West Indies studio" or "3 bedroom Kapsoya"',
               style: Theme.of(context).textTheme.bodyMedium?.copyWith(
                     color: AppTheme.textSecondary,
                   ),
@@ -266,7 +272,8 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
             if (_filter.hasActiveFilters) ...[
               const SizedBox(height: 20),
               TextButton(
-                onPressed: () => setState(() => _filter = const PropertyFilter()),
+                onPressed: () =>
+                    setState(() => _filter = const PropertyFilter()),
                 child: const Text('Clear all filters'),
               ),
             ],
@@ -345,6 +352,7 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
               TextButton.icon(
                 icon: const Icon(Icons.map_outlined, size: 16),
                 label: const Text('Map view'),
+                // /map is not a shell tab — push() is correct
                 onPressed: () => context.push('/map'),
                 style: TextButton.styleFrom(
                   foregroundColor: AppTheme.primary,
@@ -358,7 +366,6 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
           ),
         ),
         const Divider(height: 1),
-        // Grid
         Expanded(
           child: GridView.builder(
             padding: const EdgeInsets.all(16),
@@ -371,6 +378,7 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
             itemCount: properties.length,
             itemBuilder: (context, i) => PropertyCard(
               property: properties[i],
+              // /property/:id is not a shell tab — push() is correct
               onTap: () => context.push('/property/${properties[i].id}'),
             ),
           ),
