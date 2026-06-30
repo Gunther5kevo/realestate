@@ -7,7 +7,17 @@ import '../../core/models/models.dart';
 
 class AgentListingsScreen extends ConsumerWidget {
   final String agentId;
-  const AgentListingsScreen({super.key, required this.agentId});
+
+  /// True when the viewer is the agent themselves or an admin.
+  /// Controls visibility of edit / delete / add-listing actions.
+  /// Defaults to false so public browsing is always safe.
+  final bool canManage;
+
+  const AgentListingsScreen({
+    super.key,
+    required this.agentId,
+    this.canManage = false,
+  });
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -16,12 +26,13 @@ class AgentListingsScreen extends ConsumerWidget {
     return Scaffold(
       backgroundColor: AppTheme.background,
       appBar: AppBar(
-        title: const Text('My Listings'),
+        title: Text(canManage ? 'My Listings' : 'Agent Listings'),
         actions: [
-          IconButton(
-            icon: const Icon(Icons.add),
-            onPressed: () => context.push('/add-listing'),
-          ),
+          if (canManage)
+            IconButton(
+              icon: const Icon(Icons.add),
+              onPressed: () => context.push('/add-listing'),
+            ),
         ],
       ),
       body: listingsAsync.when(
@@ -38,6 +49,7 @@ class AgentListingsScreen extends ConsumerWidget {
                   separatorBuilder: (_, __) => const SizedBox(height: 12),
                   itemBuilder: (_, i) => _ListingTile(
                     property: listings[i],
+                    canManage: canManage,
                     onEdit: () =>
                         context.push('/edit-listing/${listings[i].id}'),
                     onView: () =>
@@ -52,6 +64,37 @@ class AgentListingsScreen extends ConsumerWidget {
   }
 
   Widget _buildEmpty(BuildContext context) {
+    // Public viewer sees a generic empty state with no call to action.
+    if (!canManage) {
+      return Center(
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            const Icon(Icons.home_outlined,
+                size: 64, color: AppTheme.textTertiary),
+            const SizedBox(height: 16),
+            Text(
+              'No listings yet',
+              style: Theme.of(context)
+                  .textTheme
+                  .headlineSmall
+                  ?.copyWith(color: AppTheme.textSecondary),
+            ),
+            const SizedBox(height: 8),
+            Text(
+              'This agent has no active listings at the moment',
+              textAlign: TextAlign.center,
+              style: Theme.of(context)
+                  .textTheme
+                  .bodySmall
+                  ?.copyWith(color: AppTheme.textTertiary),
+            ),
+          ],
+        ),
+      );
+    }
+
+    // Agent / admin sees the prompt to add their first listing.
     return Center(
       child: Column(
         mainAxisAlignment: MainAxisAlignment.center,
@@ -76,11 +119,7 @@ class AgentListingsScreen extends ConsumerWidget {
           ),
           const SizedBox(height: 24),
           ElevatedButton(
-            onPressed: () =>
-                (context as Element).findAncestorWidgetOfExactType<Scaffold>() !=
-                        null
-                    ? GoRouter.of(context).push('/add-listing')
-                    : null,
+            onPressed: () => context.push('/add-listing'),
             child: const Text('Add Your First Listing'),
           ),
         ],
@@ -90,6 +129,8 @@ class AgentListingsScreen extends ConsumerWidget {
 
   Future<void> _confirmDelete(
       BuildContext context, WidgetRef ref, Property property) async {
+    if (!canManage) return;
+
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (_) => AlertDialog(
@@ -134,12 +175,14 @@ class AgentListingsScreen extends ConsumerWidget {
 
 class _ListingTile extends StatelessWidget {
   final Property property;
+  final bool canManage;
   final VoidCallback onEdit;
   final VoidCallback onView;
   final VoidCallback onDelete;
 
   const _ListingTile({
     required this.property,
+    required this.canManage,
     required this.onEdit,
     required this.onView,
     required this.onDelete,
@@ -215,24 +258,28 @@ class _ListingTile extends StatelessWidget {
               Row(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  _ActionIcon(
-                    icon: Icons.edit_outlined,
-                    onTap: onEdit,
-                    tooltip: 'Edit',
-                  ),
-                  const SizedBox(width: 8),
+                  // View is always available to everyone
                   _ActionIcon(
                     icon: Icons.open_in_new,
                     onTap: onView,
                     tooltip: 'View',
                   ),
-                  const SizedBox(width: 8),
-                  _ActionIcon(
-                    icon: Icons.delete_outline,
-                    onTap: onDelete,
-                    tooltip: 'Delete',
-                    color: AppTheme.error,
-                  ),
+                  // Edit and delete only for agent / admin
+                  if (canManage) ...[
+                    const SizedBox(width: 8),
+                    _ActionIcon(
+                      icon: Icons.edit_outlined,
+                      onTap: onEdit,
+                      tooltip: 'Edit',
+                    ),
+                    const SizedBox(width: 8),
+                    _ActionIcon(
+                      icon: Icons.delete_outline,
+                      onTap: onDelete,
+                      tooltip: 'Delete',
+                      color: AppTheme.error,
+                    ),
+                  ],
                 ],
               ),
             ],

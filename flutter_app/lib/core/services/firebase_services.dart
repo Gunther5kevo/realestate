@@ -55,6 +55,52 @@ class AuthService {
     return await getCurrentUserData();
   }
 
+  // ── Re-fetch the Firebase user to get a fresh emailVerified flag.
+  // FirebaseAuth caches this client-side, so after the user clicks the
+  // link in their inbox we need to force a reload before checking.
+  //
+  // IMPORTANT: user.reload() updates the local currentUser object in
+  // place but does NOT emit a new event through authStateChanges().
+  // Any Riverpod provider (or other listener) watching authStateChanges
+  // will keep seeing the stale (unverified) user until something forces
+  // a token refresh, which IS broadcast through authStateChanges/
+  // idTokenChanges. We force that here with getIdToken(true) so callers
+  // relying on a stream-based auth provider see the update immediately
+  // instead of requiring an app restart.
+  Future<bool> reloadAndCheckEmailVerified() async {
+    final user = _auth.currentUser;
+    if (user == null) return false;
+    await user.reload();
+    final refreshed = _auth.currentUser;
+    final verified = refreshed?.emailVerified ?? false;
+
+    if (verified) {
+      // Forces a fresh ID token + re-emits through authStateChanges(),
+      // so any provider/stream watching auth state picks up the
+      // updated emailVerified flag without needing a restart.
+      await refreshed!.getIdToken(true);
+
+      // Mirror the verified flag onto the Firestore user doc so
+      // security rules / admin tools can check it without hitting Auth.
+      await _db.collection('users').doc(refreshed.uid).update({
+        'emailVerified': true,
+        'updatedAt': FieldValue.serverTimestamp(),
+      });
+    }
+    return verified;
+  }
+
+  bool get isEmailVerified => _auth.currentUser?.emailVerified ?? false;
+
+  // ── Resend with basic rate limiting handled by Firebase itself
+  // (it throttles automatically and throws too-many-requests).
+  Future<void> resendVerificationEmail() async {
+    final user = _auth.currentUser;
+    if (user == null) throw Exception('Not signed in');
+    if (user.emailVerified) return;
+    await user.sendEmailVerification();
+  }
+
   Future<void> signOut() async {
     await _auth.signOut();
   }

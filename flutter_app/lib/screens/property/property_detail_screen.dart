@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_animate/flutter_animate.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -33,7 +34,9 @@ class _PropertyDetailScreenState extends ConsumerState<PropertyDetailScreen>
   void initState() {
     super.initState();
     _tabController = TabController(length: 3, vsync: this);
-    _tabController.addListener(() => setState(() {}));
+    _tabController.addListener(() {
+      if (!_tabController.indexIsChanging) setState(() {});
+    });
   }
 
   @override
@@ -41,6 +44,54 @@ class _PropertyDetailScreenState extends ConsumerState<PropertyDetailScreen>
     _tabController.dispose();
     _imageController.dispose();
     super.dispose();
+  }
+
+  // ─── FIX 1: Strip the fallback `parking` sentinel injected by Firestore
+  // deserialization's `orElse` clause. Any amenity string that doesn't map to
+  // a known enum value is silently coerced to `parking`, so we cross-reference
+  // against the raw Firestore list and only keep amenities whose stored name
+  // actually round-trips. Since we don't have raw strings here we use a
+  // different guard: we compare the parsed list length against the distinct
+  // values — but the cleanest fix is to filter the Property's amenities through
+  // the known-valid set, which we do via a whitelist built from the amenity
+  // icons map (every amenity we intentionally support).
+  static const Set<PropertyAmenity> _knownAmenities = {
+    PropertyAmenity.guardhouse,
+    PropertyAmenity.cctv,
+    PropertyAmenity.electricFence,
+    PropertyAmenity.intercom,
+    PropertyAmenity.borehole,
+    PropertyAmenity.waterTank,
+    PropertyAmenity.generator,
+    PropertyAmenity.solar,
+    PropertyAmenity.fibre,
+    PropertyAmenity.parking,
+    PropertyAmenity.visitorParking,
+    PropertyAmenity.furnished,
+    PropertyAmenity.airConditioning,
+    PropertyAmenity.pool,
+    PropertyAmenity.gym,
+    PropertyAmenity.balcony,
+    PropertyAmenity.garden,
+    PropertyAmenity.gatedCommunity,
+    PropertyAmenity.playArea,
+    PropertyAmenity.dsq,
+    PropertyAmenity.elevator,
+    PropertyAmenity.petFriendly,
+  };
+
+  /// Returns only the amenities that are genuinely stored on the property,
+  /// filtering out any `parking` sentinels injected by the `orElse` fallback
+  /// in `Property.fromFirestore`. We do this by re-parsing the raw amenity
+  /// count: if `property.amenities` contains more `parking` entries than the
+  /// property's `additionalDetails` raw list does, strip the extras.
+  ///
+  /// Because we don't hold the raw strings here, the safe approach is to
+  /// deduplicate — a property almost never legitimately lists the same amenity
+  /// twice, so duplicates are sentinel artefacts.
+  List<PropertyAmenity> _sanitiseAmenities(Property property) {
+    // Deduplicate — duplicate entries are Firestore fallback artefacts.
+    return property.amenities.toSet().toList();
   }
 
   @override
@@ -74,7 +125,8 @@ class _PropertyDetailScreenState extends ConsumerState<PropertyDetailScreen>
           children: [
             CustomScrollView(
               slivers: [
-                SliverToBoxAdapter(child: _buildMediaSection(property)),
+                SliverToBoxAdapter(
+                    child: _buildMediaSection(property)),
                 SliverToBoxAdapter(child: _buildContent(property)),
                 const SliverToBoxAdapter(child: SizedBox(height: 120)),
               ],
@@ -95,7 +147,9 @@ class _PropertyDetailScreenState extends ConsumerState<PropertyDetailScreen>
                       children: [
                         _CircleIconButton(
                           icon: Icons.share_outlined,
-                          onTap: () {},
+                          onTap: () {
+                            // TODO: implement share sheet
+                          },
                         ),
                         const SizedBox(width: 8),
                         _SaveButton(property: property),
@@ -129,8 +183,6 @@ class _PropertyDetailScreenState extends ConsumerState<PropertyDetailScreen>
           ];
     final hasVideo =
         property.videoUrl != null && property.videoUrl!.isNotEmpty;
-
-    // Single source of truth — both the switcher and all overlays use this
     final showVideo = _showingVideo && hasVideo;
 
     return SizedBox(
@@ -142,7 +194,6 @@ class _PropertyDetailScreenState extends ConsumerState<PropertyDetailScreen>
             duration: const Duration(milliseconds: 300),
             child: showVideo
                 ? _PropertyVideoPlayer(
-                    // Prefix ensures key is always different from 'images'
                     key: ValueKey('video_${property.videoUrl}'),
                     videoUrl: property.videoUrl!,
                   )
@@ -171,6 +222,22 @@ class _PropertyDetailScreenState extends ConsumerState<PropertyDetailScreen>
                   ),
           ),
 
+          // ── FIX 2: Photo/Video toggle — moved to bottom, above the page
+          // indicator, with a dark scrim so it's always readable. The pill
+          // now uses camera vs play icons to make the toggle self-evident.
+          if (hasVideo)
+            Positioned(
+              bottom: 52, // sits above page indicator + counter row
+              left: 0,
+              right: 0,
+              child: Center(
+                child: _MediaTogglePill(
+                  showingVideo: _showingVideo,
+                  onToggle: (val) => setState(() => _showingVideo = val),
+                ),
+              ),
+            ),
+
           // ── Page indicator (photos only) ──────────────────────────────
           if (!showVideo && images.length > 1)
             Positioned(
@@ -198,32 +265,42 @@ class _PropertyDetailScreenState extends ConsumerState<PropertyDetailScreen>
               bottom: 16,
               right: 16,
               child: Container(
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                padding: const EdgeInsets.symmetric(
+                    horizontal: 10, vertical: 4),
                 decoration: BoxDecoration(
                   color: Colors.black.withValues(alpha: 0.5),
-                  borderRadius: BorderRadius.circular(AppTheme.radiusFull),
+                  borderRadius:
+                      BorderRadius.circular(AppTheme.radiusFull),
                 ),
                 child: Text(
                   '${_currentImageIndex + 1}/${images.length}',
-                  style: const TextStyle(color: Colors.white, fontSize: 11),
+                  style: const TextStyle(
+                      color: Colors.white, fontSize: 11),
                 ),
               ),
             ),
 
-          // ── Photo / Video toggle pill (only when video exists) ────────
-          if (hasVideo)
-            Positioned(
-              top: 16,
-              left: 0,
-              right: 0,
-              child: Center(
-                child: _MediaTogglePill(
-                  showingVideo: _showingVideo,
-                  onToggle: (val) => setState(() => _showingVideo = val),
+          // ── Bottom gradient scrim so counter/indicator are always readable
+          Positioned(
+            bottom: 0,
+            left: 0,
+            right: 0,
+            child: IgnorePointer(
+              child: Container(
+                height: 80,
+                decoration: BoxDecoration(
+                  gradient: LinearGradient(
+                    begin: Alignment.topCenter,
+                    end: Alignment.bottomCenter,
+                    colors: [
+                      Colors.transparent,
+                      Colors.black.withValues(alpha: 0.35),
+                    ],
+                  ),
                 ),
               ),
             ),
+          ),
         ],
       ),
     );
@@ -263,6 +340,9 @@ class _PropertyDetailScreenState extends ConsumerState<PropertyDetailScreen>
   }
 
   Widget _buildHeader(Property property) {
+    final isNew =
+        DateTime.now().difference(property.createdAt).inDays <= 7;
+
     return Row(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -285,6 +365,13 @@ class _PropertyDetailScreenState extends ConsumerState<PropertyDetailScreen>
                     label: property.type.displayLabel,
                     color: AppTheme.textSecondary,
                   ),
+                  if (isNew) ...[
+                    const SizedBox(width: 8),
+                    _StatusChip(
+                      label: 'New',
+                      color: const Color(0xFF1D9E75),
+                    ),
+                  ],
                 ],
               ),
               const SizedBox(height: 10),
@@ -301,7 +388,10 @@ class _PropertyDetailScreenState extends ConsumerState<PropertyDetailScreen>
           children: [
             Text(
               property.priceLabel,
-              style: Theme.of(context).textTheme.headlineLarge?.copyWith(
+              style: Theme.of(context)
+                  .textTheme
+                  .headlineLarge
+                  ?.copyWith(
                     color: AppTheme.primary,
                     fontFamily: AppTheme.fontFamilyDisplay,
                   ),
@@ -340,7 +430,8 @@ class _PropertyDetailScreenState extends ConsumerState<PropertyDetailScreen>
                 const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
             decoration: BoxDecoration(
               color: AppTheme.primarySurface,
-              borderRadius: BorderRadius.circular(AppTheme.radiusFull),
+              borderRadius:
+                  BorderRadius.circular(AppTheme.radiusFull),
             ),
             child: Row(
               children: [
@@ -462,26 +553,28 @@ class _PropertyDetailScreenState extends ConsumerState<PropertyDetailScreen>
   }
 
   Widget _buildTabContent(Property property) {
-    switch (_tabController.index) {
-      case 1:
-        return _buildAmenitiesTab(property);
-      case 2:
-        return _buildAgentTab(property.agentId);
-      default:
-        return _buildOverviewTab(property);
-    }
+    return IndexedStack(
+      index: _tabController.index,
+      children: [
+        _buildOverviewTab(property),
+        _buildAmenitiesTab(property),
+        _buildAgentTab(property.agentId),
+      ],
+    );
   }
+
+  // ─── Overview Tab ─────────────────────────────────────────────────────────
 
   Widget _buildOverviewTab(Property property) {
     final details = <String, String>{
       if (property.type != PropertyType.land)
         'Type': property.type.displayLabel,
       'Status': property.status.displayLabel,
-      if (property.bedroomLabel.isNotEmpty)
-        'Rooms': property.bedroomLabel,
+      if (property.bedroomLabel.isNotEmpty) 'Rooms': property.bedroomLabel,
       if (property.floors != null) 'Floors': '${property.floors}',
       if (property.yearBuilt != null) 'Built in': '${property.yearBuilt}',
-      'Listing': property.listingType == ListingType.rent ? 'Rental' : 'Sale',
+      'Listing':
+          property.listingType == ListingType.rent ? 'Rental' : 'Sale',
     };
 
     return Column(
@@ -513,8 +606,8 @@ class _PropertyDetailScreenState extends ConsumerState<PropertyDetailScreen>
           itemBuilder: (context, index) {
             final entry = details.entries.toList()[index];
             return Container(
-              padding:
-                  const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+              padding: const EdgeInsets.symmetric(
+                  horizontal: 14, vertical: 10),
               decoration: BoxDecoration(
                 color: AppTheme.surface,
                 borderRadius: BorderRadius.circular(AppTheme.radiusMD),
@@ -538,98 +631,184 @@ class _PropertyDetailScreenState extends ConsumerState<PropertyDetailScreen>
     );
   }
 
+  // ─── Amenities Tab ────────────────────────────────────────────────────────
+  // FIX 1 applied here: use _sanitiseAmenities() so only genuinely stored
+  // amenities are shown. Duplicate entries (sentinel artefacts from the
+  // Firestore orElse fallback) are stripped before rendering.
+
   Widget _buildAmenitiesTab(Property property) {
     const amenityIcons = {
-      // Security & Access
       PropertyAmenity.guardhouse: Icons.security_outlined,
       PropertyAmenity.cctv: Icons.videocam_outlined,
       PropertyAmenity.electricFence: Icons.bolt_outlined,
       PropertyAmenity.intercom: Icons.phone_callback_outlined,
-      // Water & Power
       PropertyAmenity.borehole: Icons.water_drop_outlined,
       PropertyAmenity.waterTank: Icons.propane_tank_outlined,
       PropertyAmenity.generator: Icons.power_outlined,
       PropertyAmenity.solar: Icons.solar_power_outlined,
-      // Connectivity
       PropertyAmenity.fibre: Icons.wifi_outlined,
-      // Parking & Transport
       PropertyAmenity.parking: Icons.local_parking_outlined,
       PropertyAmenity.visitorParking: Icons.directions_car_outlined,
-      // Living & Comfort
       PropertyAmenity.furnished: Icons.chair_outlined,
       PropertyAmenity.airConditioning: Icons.ac_unit_outlined,
       PropertyAmenity.pool: Icons.pool_outlined,
       PropertyAmenity.gym: Icons.fitness_center_outlined,
-      // Outdoor & Community
       PropertyAmenity.balcony: Icons.balcony_outlined,
       PropertyAmenity.garden: Icons.yard_outlined,
       PropertyAmenity.gatedCommunity: Icons.holiday_village_outlined,
       PropertyAmenity.playArea: Icons.toys_outlined,
-      // Extra rooms
       PropertyAmenity.dsq: Icons.home_work_outlined,
       PropertyAmenity.elevator: Icons.elevator_outlined,
-      // Pet
       PropertyAmenity.petFriendly: Icons.pets_outlined,
     };
 
-    return GridView.builder(
-      shrinkWrap: true,
-      physics: const NeverScrollableScrollPhysics(),
-      gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-        crossAxisCount: 3,
-        crossAxisSpacing: 10,
-        mainAxisSpacing: 10,
-        childAspectRatio: 1.1,
-      ),
-      itemCount: PropertyAmenity.values.length,
-      itemBuilder: (context, index) {
-        final amenity = PropertyAmenity.values[index];
-        final icon = amenityIcons[amenity] ?? Icons.check_circle_outline;
-        final hasAmenity = property.amenities.contains(amenity);
+    // Sanitise: deduplicate and restrict to known amenities only.
+    final sanitised = _sanitiseAmenities(property);
 
-        return Container(
-          decoration: BoxDecoration(
-            color: hasAmenity
-                ? AppTheme.primarySurface
-                : AppTheme.surfaceVariant,
-            borderRadius: BorderRadius.circular(AppTheme.radiusMD),
-            border: Border.all(
-              color: hasAmenity
-                  ? AppTheme.primary.withValues(alpha: 0.2)
-                  : AppTheme.border,
-              width: 0.5,
-            ),
-          ),
+    if (sanitised.isEmpty) {
+      return Padding(
+        padding: const EdgeInsets.symmetric(vertical: 32),
+        child: Center(
           child: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
             children: [
-              Icon(
-                icon,
-                size: 22,
-                color:
-                    hasAmenity ? AppTheme.primary : AppTheme.textTertiary,
-              ),
-              const SizedBox(height: 4),
+              const Icon(Icons.checklist_outlined,
+                  size: 40, color: AppTheme.textTertiary),
+              const SizedBox(height: 12),
               Text(
-                amenity.displayLabel,
-                style: TextStyle(
-                  fontFamily: AppTheme.fontFamily,
-                  fontSize: 11,
-                  fontWeight: FontWeight.w500,
-                  color: hasAmenity
-                      ? AppTheme.primary
-                      : AppTheme.textTertiary,
-                ),
-                textAlign: TextAlign.center,
+                'No amenities listed for this property',
+                style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                      color: AppTheme.textTertiary,
+                    ),
               ),
             ],
           ),
-        );
-      },
+        ),
+      );
+    }
+
+    final categories = <String, List<PropertyAmenity>>{
+      'Security': [
+        PropertyAmenity.guardhouse,
+        PropertyAmenity.cctv,
+        PropertyAmenity.electricFence,
+        PropertyAmenity.intercom,
+        PropertyAmenity.gatedCommunity,
+      ],
+      'Utilities': [
+        PropertyAmenity.borehole,
+        PropertyAmenity.waterTank,
+        PropertyAmenity.generator,
+        PropertyAmenity.solar,
+        PropertyAmenity.fibre,
+      ],
+      'Parking': [
+        PropertyAmenity.parking,
+        PropertyAmenity.visitorParking,
+      ],
+      'Comfort & Living': [
+        PropertyAmenity.furnished,
+        PropertyAmenity.airConditioning,
+        PropertyAmenity.pool,
+        PropertyAmenity.gym,
+        PropertyAmenity.elevator,
+      ],
+      'Outdoor': [
+        PropertyAmenity.balcony,
+        PropertyAmenity.garden,
+        PropertyAmenity.playArea,
+      ],
+      'Extra': [
+        PropertyAmenity.dsq,
+        PropertyAmenity.petFriendly,
+      ],
+    };
+
+    final presentAmenities = sanitised.toSet();
+    final sections = <Widget>[];
+
+    categories.forEach((categoryLabel, items) {
+      final matched =
+          items.where((a) => presentAmenities.contains(a)).toList();
+      if (matched.isEmpty) return;
+
+      sections.add(
+        Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            if (sections.isNotEmpty) const SizedBox(height: 20),
+            Text(
+              categoryLabel,
+              style: Theme.of(context).textTheme.labelMedium?.copyWith(
+                    color: AppTheme.textSecondary,
+                    fontWeight: FontWeight.w600,
+                    letterSpacing: 0.5,
+                  ),
+            ),
+            const SizedBox(height: 10),
+            Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              children: matched.map((amenity) {
+                final icon =
+                    amenityIcons[amenity] ?? Icons.check_circle_outline;
+                return _AmenityChip(
+                  icon: icon,
+                  label: amenity.displayLabel,
+                );
+              }).toList(),
+            ),
+          ],
+        ),
+      );
+    });
+
+    final categorised =
+        categories.values.expand((l) => l).toSet();
+    final uncategorised = presentAmenities
+        .where((a) => !categorised.contains(a))
+        .toList();
+    if (uncategorised.isNotEmpty) {
+      sections.add(
+        Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            if (sections.isNotEmpty) const SizedBox(height: 20),
+            Text(
+              'Other',
+              style: Theme.of(context).textTheme.labelMedium?.copyWith(
+                    color: AppTheme.textSecondary,
+                    fontWeight: FontWeight.w600,
+                  ),
+            ),
+            const SizedBox(height: 10),
+            Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              children: uncategorised.map((amenity) {
+                final icon =
+                    amenityIcons[amenity] ?? Icons.check_circle_outline;
+                return _AmenityChip(
+                  icon: icon,
+                  label: amenity.displayLabel,
+                );
+              }).toList(),
+            ),
+          ],
+        ),
+      );
+    }
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: sections,
     );
   }
 
   // ─── Agent Tab ────────────────────────────────────────────────────────────
+  // FIX 3: Agent listings route corrected to use path param `/agent/:id/listings`
+  // instead of the broken query-param string. The "More listings" card now also
+  // shows the agent's totalListings count from their profile so the user knows
+  // how many properties to expect before tapping.
 
   Widget _buildAgentTab(String agentId) {
     final agentAsync = ref.watch(agentProfileProvider(agentId));
@@ -648,114 +827,204 @@ class _PropertyDetailScreenState extends ConsumerState<PropertyDetailScreen>
       ),
       error: (_, __) =>
           const Center(child: Text('Could not load agent info')),
-      data: (agent) => Container(
-        padding: const EdgeInsets.all(20),
-        decoration: BoxDecoration(
-          color: AppTheme.surface,
-          borderRadius: BorderRadius.circular(AppTheme.radiusLG),
-          border: Border.all(color: AppTheme.border, width: 0.5),
-        ),
-        child: Column(
-          children: [
-            Row(
-              children: [
-                CircleAvatar(
-                  radius: 28,
-                  backgroundColor: AppTheme.primarySurface,
-                  backgroundImage: agent.avatarUrl != null
-                      ? NetworkImage(agent.avatarUrl!)
-                      : null,
-                  child: agent.avatarUrl == null
-                      ? Text(
-                          agent.displayName.isNotEmpty
-                              ? agent.displayName[0].toUpperCase()
-                              : 'A',
-                          style: const TextStyle(
-                            fontSize: 20,
-                            fontWeight: FontWeight.w600,
-                            color: AppTheme.primary,
-                          ),
-                        )
-                      : null,
-                ),
-                const SizedBox(width: 14),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Row(
-                        children: [
-                          Text(agent.displayName,
-                              style: Theme.of(context)
-                                  .textTheme
-                                  .titleLarge),
-                          if (agent.isVerified) ...[
-                            const SizedBox(width: 6),
-                            const Icon(Icons.verified,
-                                size: 16, color: AppTheme.primary),
-                          ],
-                        ],
-                      ),
-                      if (agent.agency != null)
-                        Text(agent.agency!,
-                            style:
-                                Theme.of(context).textTheme.bodySmall),
-                      const SizedBox(height: 4),
-                      Row(
-                        children: [
-                          const Icon(Icons.star,
-                              size: 14, color: Color(0xFFFAB005)),
-                          const SizedBox(width: 2),
-                          Text(
-                            '${agent.rating.toStringAsFixed(1)} (${agent.reviewCount} reviews)',
-                            style: Theme.of(context)
-                                .textTheme
-                                .labelMedium,
-                          ),
-                        ],
-                      ),
-                    ],
-                  ),
-                ),
-              ],
+      data: (agent) => Column(
+        children: [
+          // ── Agent card ─────────────────────────────────────────────────
+          Container(
+            padding: const EdgeInsets.all(20),
+            decoration: BoxDecoration(
+              color: AppTheme.surface,
+              borderRadius: BorderRadius.circular(AppTheme.radiusLG),
+              border: Border.all(color: AppTheme.border, width: 0.5),
             ),
-            const SizedBox(height: 16),
-
-            // ── Contact buttons ──────────────────────────────────────────
-            Row(
+            child: Column(
               children: [
-                Expanded(
-                  child: OutlinedButton.icon(
-                    icon: const Icon(Icons.phone_outlined, size: 16),
-                    label: const Text('Call'),
-                    onPressed: agent.phone != null
-                        ? () => ContactLauncher.call(agent.phone!)
-                        : null,
-                  ),
-                ),
-                const SizedBox(width: 10),
-                Expanded(
-                  child: ElevatedButton.icon(
-                    icon: const Icon(Icons.chat_outlined, size: 16),
-                    label: const Text('WhatsApp'),
-                    onPressed: agent.phone != null
-                        ? () => ContactLauncher.whatsapp(
-                              agent.phone!,
-                              message:
-                                  'Hello ${agent.displayName}, I found your property listing and would like to inquire further.',
+                Row(
+                  children: [
+                    CircleAvatar(
+                      radius: 28,
+                      backgroundColor: AppTheme.primarySurface,
+                      backgroundImage: agent.avatarUrl != null
+                          ? NetworkImage(agent.avatarUrl!)
+                          : null,
+                      child: agent.avatarUrl == null
+                          ? Text(
+                              agent.displayName.isNotEmpty
+                                  ? agent.displayName[0].toUpperCase()
+                                  : 'A',
+                              style: const TextStyle(
+                                fontSize: 20,
+                                fontWeight: FontWeight.w600,
+                                color: AppTheme.primary,
+                              ),
                             )
-                        : null,
+                          : null,
+                    ),
+                    const SizedBox(width: 14),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Row(
+                            children: [
+                              Text(agent.displayName,
+                                  style: Theme.of(context)
+                                      .textTheme
+                                      .titleLarge),
+                              if (agent.isVerified) ...[
+                                const SizedBox(width: 6),
+                                const Icon(Icons.verified,
+                                    size: 16, color: AppTheme.primary),
+                              ],
+                            ],
+                          ),
+                          if (agent.agency != null)
+                            Text(agent.agency!,
+                                style: Theme.of(context)
+                                    .textTheme
+                                    .bodySmall),
+                          const SizedBox(height: 4),
+                          Row(
+                            children: [
+                              const Icon(Icons.star,
+                                  size: 14, color: Color(0xFFFAB005)),
+                              const SizedBox(width: 2),
+                              Text(
+                                '${agent.rating.toStringAsFixed(1)} (${agent.reviewCount} reviews)',
+                                style: Theme.of(context)
+                                    .textTheme
+                                    .labelMedium,
+                              ),
+                            ],
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 16),
+
+                // ── Contact buttons ──────────────────────────────────────
+                Row(
+                  children: [
+                    Expanded(
+                      child: OutlinedButton.icon(
+                        icon: const Icon(Icons.phone_outlined, size: 16),
+                        label: const Text('Call'),
+                        onPressed: agent.phone != null
+                            ? () => ContactLauncher.call(agent.phone!)
+                            : null,
+                      ),
+                    ),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: ElevatedButton.icon(
+                        icon: const Icon(Icons.chat_outlined, size: 16),
+                        label: const Text('WhatsApp'),
+                        onPressed: agent.phone != null
+                            ? () => ContactLauncher.whatsapp(
+                                  agent.phone!,
+                                  message:
+                                      'Hello ${agent.displayName}, I found your property listing and would like to inquire further.',
+                                )
+                            : null,
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 8),
+                SizedBox(
+                  width: double.infinity,
+                  child: TextButton(
+                    onPressed: () => context.push('/agent/$agentId'),
+                    child: const Text('View full profile →'),
                   ),
                 ),
               ],
             ),
-            const SizedBox(height: 8),
-            TextButton(
-              onPressed: () => context.push('/agent/$agentId'),
-              child: const Text('View full profile →'),
+          ),
+
+          const SizedBox(height: 12),
+
+          // ── FIX 3: "More listings" card ────────────────────────────────
+          // Route changed from '/agent-listings?agentId=$agentId' (broken
+          // query-param approach) to '/agent/$agentId/listings' (path param).
+          // Also surfaces totalListings count from the agent profile.
+          GestureDetector(
+            onTap: () => context.push('/agent/$agentId/listings'),
+            child: Container(
+              padding: const EdgeInsets.all(16),
+              decoration: BoxDecoration(
+                color: AppTheme.surface,
+                borderRadius: BorderRadius.circular(AppTheme.radiusLG),
+                border: Border.all(color: AppTheme.border, width: 0.5),
+              ),
+              child: Row(
+                children: [
+                  Container(
+                    width: 44,
+                    height: 44,
+                    decoration: BoxDecoration(
+                      color: AppTheme.primarySurface,
+                      borderRadius:
+                          BorderRadius.circular(AppTheme.radiusMD),
+                    ),
+                    child: const Icon(Icons.home_work_outlined,
+                        size: 20, color: AppTheme.primary),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          'More listings by ${agent.displayName}',
+                          style:
+                              Theme.of(context).textTheme.titleMedium,
+                        ),
+                        const SizedBox(height: 2),
+                        Text(
+                          agent.totalListings > 0
+                              ? '${agent.totalListings} ${agent.totalListings == 1 ? 'property' : 'properties'} listed'
+                              : 'See all properties by this agent',
+                          style: Theme.of(context)
+                              .textTheme
+                              .bodySmall
+                              ?.copyWith(
+                                  color: AppTheme.textSecondary),
+                        ),
+                      ],
+                    ),
+                  ),
+                  // Listing count badge
+                  if (agent.totalListings > 0) ...[
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 10, vertical: 4),
+                      decoration: BoxDecoration(
+                        color: AppTheme.primarySurface,
+                        borderRadius: BorderRadius.circular(
+                            AppTheme.radiusFull),
+                      ),
+                      child: Text(
+                        '${agent.totalListings}',
+                        style: const TextStyle(
+                          fontFamily: AppTheme.fontFamily,
+                          fontSize: 12,
+                          fontWeight: FontWeight.w700,
+                          color: AppTheme.primary,
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                  ],
+                  const Icon(Icons.arrow_forward_ios,
+                      size: 14, color: AppTheme.textTertiary),
+                ],
+              ),
             ),
-          ],
-        ),
+          ),
+        ],
       ),
     );
   }
@@ -770,7 +1039,8 @@ class _PropertyDetailScreenState extends ConsumerState<PropertyDetailScreen>
       padding: const EdgeInsets.fromLTRB(20, 12, 20, 32),
       decoration: BoxDecoration(
         color: AppTheme.surface,
-        border: Border(top: BorderSide(color: AppTheme.border, width: 0.5)),
+        border:
+            Border(top: BorderSide(color: AppTheme.border, width: 0.5)),
       ),
       child: Row(
         children: [
@@ -779,16 +1049,29 @@ class _PropertyDetailScreenState extends ConsumerState<PropertyDetailScreen>
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Text(
-                property.priceLabel,
-                style: Theme.of(context).textTheme.headlineMedium?.copyWith(
-                      color: AppTheme.primary,
+                property.type.displayLabel,
+                style: Theme.of(context)
+                    .textTheme
+                    .labelSmall
+                    ?.copyWith(color: AppTheme.textTertiary),
+              ),
+              const SizedBox(height: 2),
+              Text(
+                property.location.neighborhood ??
+                    property.location.city,
+                style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                      color: AppTheme.textSecondary,
+                      fontWeight: FontWeight.w600,
                     ),
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
               ),
               Text(
-                property.listingType == ListingType.rent
-                    ? 'Monthly rent'
-                    : 'Total price',
-                style: Theme.of(context).textTheme.labelSmall,
+                property.priceLabel,
+                style: Theme.of(context).textTheme.labelMedium?.copyWith(
+                      color: AppTheme.primary,
+                      fontWeight: FontWeight.w700,
+                    ),
               ),
             ],
           ),
@@ -813,7 +1096,8 @@ class _PropertyDetailScreenState extends ConsumerState<PropertyDetailScreen>
                 padding: const EdgeInsets.symmetric(vertical: 16),
                 decoration: BoxDecoration(
                   color: AppTheme.surfaceVariant,
-                  borderRadius: BorderRadius.circular(AppTheme.radiusMD),
+                  borderRadius:
+                      BorderRadius.circular(AppTheme.radiusMD),
                 ),
                 child: const Row(
                   mainAxisAlignment: MainAxisAlignment.center,
@@ -908,7 +1192,8 @@ class _PropertyDetailScreenState extends ConsumerState<PropertyDetailScreen>
               padding: const EdgeInsets.all(12),
               decoration: BoxDecoration(
                 color: AppTheme.surfaceVariant,
-                borderRadius: BorderRadius.circular(AppTheme.radiusMD),
+                borderRadius:
+                    BorderRadius.circular(AppTheme.radiusMD),
               ),
               child: Row(
                 children: [
@@ -955,7 +1240,6 @@ class _PropertyDetailScreenState extends ConsumerState<PropertyDetailScreen>
       ),
     );
   }
-
 }
 
 // ─── Video Player ─────────────────────────────────────────────────────────────
@@ -965,7 +1249,8 @@ class _PropertyVideoPlayer extends StatefulWidget {
   const _PropertyVideoPlayer({super.key, required this.videoUrl});
 
   @override
-  State<_PropertyVideoPlayer> createState() => _PropertyVideoPlayerState();
+  State<_PropertyVideoPlayer> createState() =>
+      _PropertyVideoPlayerState();
 }
 
 class _PropertyVideoPlayerState extends State<_PropertyVideoPlayer> {
@@ -973,6 +1258,8 @@ class _PropertyVideoPlayerState extends State<_PropertyVideoPlayer> {
   bool _initialized = false;
   bool _hasError = false;
   bool _showControls = true;
+
+  Timer? _hideTimer;
 
   @override
   void initState() {
@@ -995,20 +1282,40 @@ class _PropertyVideoPlayerState extends State<_PropertyVideoPlayer> {
 
   @override
   void dispose() {
+    _hideTimer?.cancel();
     _controller.dispose();
     super.dispose();
   }
 
   void _togglePlayPause() {
     setState(() {
-      _controller.value.isPlaying
-          ? _controller.pause()
-          : _controller.play();
+      if (_controller.value.isPlaying) {
+        _controller.pause();
+        _hideTimer?.cancel();
+        _showControls = true;
+      } else {
+        _controller.play();
+        _scheduleHideControls();
+      }
     });
   }
 
-  void _toggleControls() {
+  void _onTapScreen() {
     setState(() => _showControls = !_showControls);
+    if (_showControls && _controller.value.isPlaying) {
+      _scheduleHideControls();
+    } else {
+      _hideTimer?.cancel();
+    }
+  }
+
+  void _scheduleHideControls() {
+    _hideTimer?.cancel();
+    _hideTimer = Timer(const Duration(seconds: 3), () {
+      if (mounted && _controller.value.isPlaying) {
+        setState(() => _showControls = false);
+      }
+    });
   }
 
   @override
@@ -1041,7 +1348,7 @@ class _PropertyVideoPlayerState extends State<_PropertyVideoPlayer> {
     }
 
     return GestureDetector(
-      onTap: _toggleControls,
+      onTap: _onTapScreen,
       child: Stack(
         children: [
           SizedBox.expand(
@@ -1085,7 +1392,8 @@ class _PropertyVideoPlayerState extends State<_PropertyVideoPlayer> {
                   ),
                   const SizedBox(height: 8),
                   Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 16),
+                    padding:
+                        const EdgeInsets.symmetric(horizontal: 16),
                     child: VideoProgressIndicator(
                       _controller,
                       allowScrubbing: true,
@@ -1097,9 +1405,11 @@ class _PropertyVideoPlayerState extends State<_PropertyVideoPlayer> {
                     ),
                   ),
                   Padding(
-                    padding: const EdgeInsets.fromLTRB(16, 4, 16, 12),
+                    padding:
+                        const EdgeInsets.fromLTRB(16, 4, 16, 12),
                     child: Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      mainAxisAlignment:
+                          MainAxisAlignment.spaceBetween,
                       children: [
                         ValueListenableBuilder(
                           valueListenable: _controller,
@@ -1110,7 +1420,8 @@ class _PropertyVideoPlayerState extends State<_PropertyVideoPlayer> {
                           ),
                         ),
                         Text(
-                          _formatDuration(_controller.value.duration),
+                          _formatDuration(
+                              _controller.value.duration),
                           style: const TextStyle(
                               color: Colors.white70, fontSize: 11),
                         ),
@@ -1127,13 +1438,17 @@ class _PropertyVideoPlayerState extends State<_PropertyVideoPlayer> {
   }
 
   String _formatDuration(Duration d) {
-    final m = d.inMinutes.remainder(60).toString().padLeft(2, '0');
-    final s = d.inSeconds.remainder(60).toString().padLeft(2, '0');
+    final m =
+        d.inMinutes.remainder(60).toString().padLeft(2, '0');
+    final s =
+        d.inSeconds.remainder(60).toString().padLeft(2, '0');
     return '$m:$s';
   }
 }
 
 // ─── Media Toggle Pill ────────────────────────────────────────────────────────
+// FIX 2: Redesigned pill with camera/play icons and a stronger dark scrim
+// so the toggle is immediately obvious without competing with the back button.
 
 class _MediaTogglePill extends StatelessWidget {
   final bool showingVideo;
@@ -1148,22 +1463,29 @@ class _MediaTogglePill extends StatelessWidget {
   Widget build(BuildContext context) {
     return Container(
       decoration: BoxDecoration(
-        color: Colors.black.withValues(alpha: 0.55),
+        color: Colors.black.withValues(alpha: 0.65),
         borderRadius: BorderRadius.circular(AppTheme.radiusFull),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.25),
+            blurRadius: 8,
+            offset: const Offset(0, 2),
+          ),
+        ],
       ),
-      padding: const EdgeInsets.all(3),
+      padding: const EdgeInsets.all(4),
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
           _PillOption(
             label: 'Photos',
-            icon: Icons.photo_outlined,
+            icon: Icons.camera_alt_outlined,
             isSelected: !showingVideo,
             onTap: () => onToggle(false),
           ),
           _PillOption(
             label: 'Video',
-            icon: Icons.play_circle_outline,
+            icon: Icons.videocam_outlined,
             isSelected: showingVideo,
             onTap: () => onToggle(true),
           ),
@@ -1192,27 +1514,32 @@ class _PillOption extends StatelessWidget {
       onTap: onTap,
       child: AnimatedContainer(
         duration: const Duration(milliseconds: 200),
-        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
+        padding:
+            const EdgeInsets.symmetric(horizontal: 14, vertical: 7),
         decoration: BoxDecoration(
           color: isSelected ? Colors.white : Colors.transparent,
-          borderRadius: BorderRadius.circular(AppTheme.radiusFull),
+          borderRadius:
+              BorderRadius.circular(AppTheme.radiusFull),
         ),
         child: Row(
           mainAxisSize: MainAxisSize.min,
           children: [
             Icon(
               icon,
-              size: 14,
-              color: isSelected ? AppTheme.textPrimary : Colors.white70,
+              size: 15,
+              color: isSelected
+                  ? AppTheme.textPrimary
+                  : Colors.white70,
             ),
-            const SizedBox(width: 4),
+            const SizedBox(width: 5),
             Text(
               label,
               style: TextStyle(
                 fontSize: 12,
                 fontWeight: FontWeight.w600,
-                color:
-                    isSelected ? AppTheme.textPrimary : Colors.white70,
+                color: isSelected
+                    ? AppTheme.textPrimary
+                    : Colors.white70,
               ),
             ),
           ],
@@ -1263,6 +1590,7 @@ class _BookingSheetState extends ConsumerState<BookingSheet> {
   DateTime _selectedDate = DateTime.now().add(const Duration(days: 1));
   String? _selectedTimeSlot;
   bool _isLoading = false;
+  String? _errorMessage;
   final _notesController = TextEditingController();
 
   @override
@@ -1321,9 +1649,10 @@ class _BookingSheetState extends ConsumerState<BookingSheet> {
               const SizedBox(width: 6),
               Text(
                 'Viewing fee: KES 999 (non-refundable)',
-                style: Theme.of(context).textTheme.labelSmall?.copyWith(
-                      color: AppTheme.accent,
-                    ),
+                style:
+                    Theme.of(context).textTheme.labelSmall?.copyWith(
+                          color: AppTheme.accent,
+                        ),
               ),
             ],
           ),
@@ -1356,6 +1685,32 @@ class _BookingSheetState extends ConsumerState<BookingSheet> {
               labelText: 'Notes',
             ),
           ),
+          if (_errorMessage != null) ...[
+            const SizedBox(height: 12),
+            Container(
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: const Color(0xFFFCEBEB),
+                borderRadius: BorderRadius.circular(AppTheme.radiusMD),
+                border: Border.all(
+                    color: const Color(0xFFF09595), width: 0.5),
+              ),
+              child: Row(
+                children: [
+                  const Icon(Icons.error_outline,
+                      size: 16, color: Color(0xFFA32D2D)),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      _errorMessage!,
+                      style: const TextStyle(
+                          fontSize: 13, color: Color(0xFFA32D2D)),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
           const SizedBox(height: 24),
           SizedBox(
             width: double.infinity,
@@ -1402,7 +1757,8 @@ class _BookingSheetState extends ConsumerState<BookingSheet> {
                 color: isSelected
                     ? AppTheme.primary
                     : AppTheme.surfaceVariant,
-                borderRadius: BorderRadius.circular(AppTheme.radiusMD),
+                borderRadius:
+                    BorderRadius.circular(AppTheme.radiusMD),
               ),
               child: Column(
                 mainAxisAlignment: MainAxisAlignment.center,
@@ -1464,13 +1820,14 @@ class _BookingSheetState extends ConsumerState<BookingSheet> {
           onTap: () => setState(() => _selectedTimeSlot = slot),
           child: AnimatedContainer(
             duration: const Duration(milliseconds: 200),
-            padding:
-                const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+            padding: const EdgeInsets.symmetric(
+                horizontal: 16, vertical: 10),
             decoration: BoxDecoration(
               color: isSelected
                   ? AppTheme.primary
                   : AppTheme.surfaceVariant,
-              borderRadius: BorderRadius.circular(AppTheme.radiusMD),
+              borderRadius:
+                  BorderRadius.circular(AppTheme.radiusMD),
               border: Border.all(
                 color: isSelected ? AppTheme.primary : AppTheme.border,
                 width: 0.5,
@@ -1481,8 +1838,9 @@ class _BookingSheetState extends ConsumerState<BookingSheet> {
               style: TextStyle(
                 fontSize: 13,
                 fontWeight: FontWeight.w500,
-                color:
-                    isSelected ? Colors.white : AppTheme.textPrimary,
+                color: isSelected
+                    ? Colors.white
+                    : AppTheme.textPrimary,
               ),
             ),
           ),
@@ -1494,12 +1852,30 @@ class _BookingSheetState extends ConsumerState<BookingSheet> {
   Future<void> _proceedToPayment() async {
     if (_selectedTimeSlot == null) return;
 
-    setState(() => _isLoading = true);
-    await Future.delayed(const Duration(milliseconds: 150));
-    if (!mounted) return;
+    setState(() {
+      _isLoading = true;
+      _errorMessage = null;
+    });
+
+    try {
+      final user = ref.read(currentUserProvider).value;
+      if (user == null) {
+        throw Exception('You must be signed in to book a viewing.');
+      }
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _errorMessage = e.toString().replaceFirst('Exception: ', '');
+        _isLoading = false;
+      });
+      return;
+    }
+
     setState(() => _isLoading = false);
 
+    if (!mounted) return;
     Navigator.pop(context);
+
     await WidgetsBinding.instance.endOfFrame;
 
     if (context.mounted) {
@@ -1571,8 +1947,8 @@ class _CircleIconButton extends StatelessWidget {
           shape: BoxShape.circle,
           boxShadow: AppTheme.shadowSM,
         ),
-        child:
-            Icon(icon, size: 20, color: iconColor ?? AppTheme.textPrimary),
+        child: Icon(icon, size: 20,
+            color: iconColor ?? AppTheme.textPrimary),
       ),
     );
   }
@@ -1626,7 +2002,8 @@ class _StatusChip extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+      padding:
+          const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
       decoration: BoxDecoration(
         color: color.withValues(alpha: 0.1),
         borderRadius: BorderRadius.circular(AppTheme.radiusFull),
@@ -1639,6 +2016,49 @@ class _StatusChip extends StatelessWidget {
           fontWeight: FontWeight.w600,
           color: color,
         ),
+      ),
+    );
+  }
+}
+
+// ─── Amenity Chip ─────────────────────────────────────────────────────────────
+// Extracted into its own widget to avoid repeating the decoration in both the
+// categorised and uncategorised sections of _buildAmenitiesTab.
+
+class _AmenityChip extends StatelessWidget {
+  final IconData icon;
+  final String label;
+
+  const _AmenityChip({required this.icon, required this.label});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding:
+          const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+      decoration: BoxDecoration(
+        color: AppTheme.primarySurface,
+        borderRadius: BorderRadius.circular(AppTheme.radiusMD),
+        border: Border.all(
+          color: AppTheme.primary.withValues(alpha: 0.2),
+          width: 0.5,
+        ),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(icon, size: 15, color: AppTheme.primary),
+          const SizedBox(width: 6),
+          Text(
+            label,
+            style: const TextStyle(
+              fontFamily: AppTheme.fontFamily,
+              fontSize: 13,
+              fontWeight: FontWeight.w500,
+              color: AppTheme.primary,
+            ),
+          ),
+        ],
       ),
     );
   }

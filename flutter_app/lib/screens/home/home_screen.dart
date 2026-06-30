@@ -62,7 +62,8 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
             SliverToBoxAdapter(child: _buildListingTypeToggle(filter)),
             SliverToBoxAdapter(child: _buildSearchRow(filter)),
             SliverToBoxAdapter(child: _buildFeaturedSection()),
-            SliverToBoxAdapter(child: _buildSectionHeader(filter)),
+            // Section header is built inside _buildPropertyGrid so it can
+            // access the resolved list length without a second provider read.
             _buildPropertyGrid(filter),
             const SliverToBoxAdapter(child: SizedBox(height: 100)),
           ],
@@ -98,7 +99,6 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
       actions: [
         IconButton(
           icon: const Icon(Icons.notifications_outlined),
-          // /notifications is not a shell tab — push() is correct
           onPressed: () => context.push('/notifications'),
           color: AppTheme.textPrimary,
         ),
@@ -156,7 +156,6 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
     final userAsync = ref.watch(currentUserProvider);
 
     return GestureDetector(
-      // /profile is a shell tab — go() is correct
       onTap: () => context.go('/profile'),
       child: Container(
         width: 36,
@@ -171,32 +170,22 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
           ),
         ),
         child: userAsync.when(
-          loading: () => const Icon(
-            Icons.person_outline,
-            size: 18,
-            color: AppTheme.primary,
-          ),
-          error: (_, __) => const Icon(
-            Icons.person_outline,
-            size: 18,
-            color: AppTheme.primary,
-          ),
+          loading: () => const Icon(Icons.person_outline,
+              size: 18, color: AppTheme.primary),
+          error: (_, __) => const Icon(Icons.person_outline,
+              size: 18, color: AppTheme.primary),
           data: (user) {
             if (user?.avatarUrl != null) {
               return ClipOval(
                 child: CachedNetworkImage(
                   imageUrl: user!.avatarUrl!,
                   fit: BoxFit.cover,
-                  placeholder: (_, __) => const Icon(
-                    Icons.person_outline,
-                    size: 18,
-                    color: AppTheme.primary,
-                  ),
+                  placeholder: (_, __) => const Icon(Icons.person_outline,
+                      size: 18, color: AppTheme.primary),
                   errorWidget: (_, __, ___) => const Icon(
-                    Icons.person_outline,
-                    size: 18,
-                    color: AppTheme.primary,
-                  ),
+                      Icons.person_outline,
+                      size: 18,
+                      color: AppTheme.primary),
                 ),
               );
             }
@@ -247,6 +236,9 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                   filter.copyWith(listingType: ListingType.rent);
             },
           ),
+          const Spacer(),
+          // Quick count badge — rebuilt when filter changes
+          _FilterCountBadge(filter: filter),
         ],
       ),
     );
@@ -263,21 +255,18 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
         children: [
           Expanded(
             child: SearchBarWidget(
-              // FIX: /search is a shell tab route — must use go(), not push().
-              // Deferred via postFrameCallback to avoid mid-build assertions.
               onTap: () {
                 WidgetsBinding.instance.addPostFrameCallback((_) {
                   if (context.mounted) context.go('/search');
                 });
               },
               hintText: effectiveType == ListingType.rent
-                  ? 'Search rentals in Eldoret...'
+                  ? 'Search rentals...'
                   : 'Search properties for sale...',
             ),
           ),
           const SizedBox(width: 8),
           GestureDetector(
-            // /map is not a shell tab — push() is correct
             onTap: () => context.push('/map'),
             child: Container(
               width: 48,
@@ -287,11 +276,8 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                 borderRadius: BorderRadius.circular(AppTheme.radiusMD),
                 border: Border.all(color: AppTheme.border, width: 0.5),
               ),
-              child: const Icon(
-                Icons.map_outlined,
-                color: AppTheme.textSecondary,
-                size: 20,
-              ),
+              child: const Icon(Icons.map_outlined,
+                  color: AppTheme.textSecondary, size: 20),
             ),
           ),
           const SizedBox(width: 8),
@@ -343,7 +329,8 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                     width: 240,
                     decoration: BoxDecoration(
                       color: AppTheme.border,
-                      borderRadius: BorderRadius.circular(AppTheme.radiusXL),
+                      borderRadius:
+                          BorderRadius.circular(AppTheme.radiusXL),
                     ),
                   ),
                 ),
@@ -352,7 +339,30 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
           ),
         ],
       ),
-      error: (_, __) => const SizedBox.shrink(),
+      error: (_, __) => Padding(
+        padding: const EdgeInsets.fromLTRB(20, 16, 20, 8),
+        child: Container(
+          padding: const EdgeInsets.all(14),
+          decoration: BoxDecoration(
+            color: AppTheme.surfaceVariant,
+            borderRadius: BorderRadius.circular(AppTheme.radiusMD),
+          ),
+          child: Row(
+            children: [
+              const Icon(Icons.info_outline,
+                  size: 16, color: AppTheme.textTertiary),
+              const SizedBox(width: 8),
+              Text(
+                'Could not load featured listings',
+                style: Theme.of(context)
+                    .textTheme
+                    .bodySmall
+                    ?.copyWith(color: AppTheme.textTertiary),
+              ),
+            ],
+          ),
+        ),
+      ),
       data: (properties) {
         if (properties.isEmpty) return const SizedBox.shrink();
         return Column(
@@ -373,7 +383,6 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                     ),
                     child: FeaturedPropertyCard(
                       property: property,
-                      // /property/:id is not a shell tab — push() is correct
                       onTap: () =>
                           context.push('/property/${property.id}'),
                     ).animate().fadeIn(
@@ -396,9 +405,9 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
       child: Row(
         mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: [
-          Text('Featured', style: Theme.of(context).textTheme.headlineMedium),
+          Text('Featured',
+              style: Theme.of(context).textTheme.headlineMedium),
           TextButton(
-            // FIX: /search is a shell tab — go() is correct
             onPressed: () => context.go('/search'),
             child: const Text('See all'),
           ),
@@ -409,63 +418,38 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
 
   // ─── All Properties Grid ──────────────────────────────────────────────────
 
-  Widget _buildSectionHeader(PropertyFilter filter) {
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(20, 24, 20, 12),
-      child: Row(
-        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-        children: [
-          Text(
-            'All Properties',
-            style: Theme.of(context).textTheme.headlineMedium,
-          ),
-          Container(
-            padding:
-                const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-            decoration: BoxDecoration(
-              color: AppTheme.primarySurface,
-              borderRadius: BorderRadius.circular(AppTheme.radiusFull),
-            ),
-            child: Text(
-              filter.hasActiveFilters ? 'Filtered' : 'All',
-              style: Theme.of(context).textTheme.labelSmall?.copyWith(
-                    color: AppTheme.primary,
-                    fontWeight: FontWeight.w600,
-                  ),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
   Widget _buildPropertyGrid(PropertyFilter filter) {
     final propertiesAsync = ref.watch(propertiesProvider(filter));
 
     return propertiesAsync.when(
-      loading: () => SliverPadding(
-        padding: const EdgeInsets.symmetric(horizontal: 20),
-        sliver: SliverGrid(
-          delegate: SliverChildBuilderDelegate(
-            (_, __) => Shimmer.fromColors(
+      loading: () => SliverList(
+        delegate: SliverChildListDelegate([
+          _buildSectionHeader(filter, null),
+          GridView.builder(
+            shrinkWrap: true,
+            physics: const NeverScrollableScrollPhysics(),
+            padding: const EdgeInsets.symmetric(horizontal: 20),
+            gridDelegate:
+                const SliverGridDelegateWithFixedCrossAxisCount(
+              crossAxisCount: 2,
+              crossAxisSpacing: 12,
+              mainAxisSpacing: 12,
+              childAspectRatio: 0.72,
+            ),
+            itemCount: 6,
+            itemBuilder: (_, __) => Shimmer.fromColors(
               baseColor: AppTheme.border,
               highlightColor: AppTheme.surfaceVariant,
               child: Container(
                 decoration: BoxDecoration(
                   color: AppTheme.border,
-                  borderRadius: BorderRadius.circular(AppTheme.radiusLG),
+                  borderRadius:
+                      BorderRadius.circular(AppTheme.radiusLG),
                 ),
               ),
             ),
-            childCount: 6,
           ),
-          gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-            crossAxisCount: 2,
-            crossAxisSpacing: 12,
-            mainAxisSpacing: 12,
-            childAspectRatio: 0.72,
-          ),
-        ),
+        ]),
       ),
       error: (_, __) => SliverToBoxAdapter(
         child: Padding(
@@ -493,43 +477,68 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
       ),
       data: (properties) {
         if (properties.isEmpty) {
-          return SliverToBoxAdapter(
-            child: Padding(
-              padding: const EdgeInsets.all(40),
-              child: Column(
-                children: [
-                  const Icon(Icons.home_outlined,
-                      size: 64, color: AppTheme.textTertiary),
-                  const SizedBox(height: 16),
-                  Text(
-                    'No properties found',
-                    style: Theme.of(context)
-                        .textTheme
-                        .headlineSmall
-                        ?.copyWith(color: AppTheme.textSecondary),
-                  ),
-                  const SizedBox(height: 8),
-                  Text(
-                    'Try adjusting your filters',
-                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                          color: AppTheme.textTertiary,
-                        ),
-                  ),
-                ],
+          return SliverList(
+            delegate: SliverChildListDelegate([
+              _buildSectionHeader(filter, 0),
+              Padding(
+                padding: const EdgeInsets.all(40),
+                child: Column(
+                  children: [
+                    const Icon(Icons.home_outlined,
+                        size: 64, color: AppTheme.textTertiary),
+                    const SizedBox(height: 16),
+                    Text(
+                      'No properties found',
+                      style: Theme.of(context)
+                          .textTheme
+                          .headlineSmall
+                          ?.copyWith(color: AppTheme.textSecondary),
+                    ),
+                    const SizedBox(height: 8),
+                    Text(
+                      'Try adjusting your filters',
+                      style: Theme.of(context)
+                          .textTheme
+                          .bodySmall
+                          ?.copyWith(color: AppTheme.textTertiary),
+                    ),
+                    const SizedBox(height: 16),
+                    if (filter.hasActiveFilters)
+                      TextButton.icon(
+                        icon: const Icon(Icons.tune, size: 16),
+                        label: const Text('Clear filters'),
+                        onPressed: () {
+                          ref
+                              .read(propertyFilterProvider.notifier)
+                              .state = const PropertyFilter();
+                        },
+                      ),
+                  ],
+                ),
               ),
-            ),
+            ]),
           );
         }
 
-        return SliverPadding(
-          padding: const EdgeInsets.symmetric(horizontal: 20),
-          sliver: SliverGrid(
-            delegate: SliverChildBuilderDelegate(
-              (context, index) {
+        return SliverList(
+          delegate: SliverChildListDelegate([
+            _buildSectionHeader(filter, properties.length),
+            GridView.builder(
+              shrinkWrap: true,
+              physics: const NeverScrollableScrollPhysics(),
+              padding: const EdgeInsets.symmetric(horizontal: 20),
+              gridDelegate:
+                  const SliverGridDelegateWithFixedCrossAxisCount(
+                crossAxisCount: 2,
+                crossAxisSpacing: 12,
+                mainAxisSpacing: 12,
+                childAspectRatio: 0.72,
+              ),
+              itemCount: properties.length,
+              itemBuilder: (context, index) {
                 final property = properties[index];
                 return PropertyCard(
                   property: property,
-                  // /property/:id is not a shell tab — push() is correct
                   onTap: () =>
                       context.push('/property/${property.id}'),
                 )
@@ -540,22 +549,93 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                     )
                     .slideY(begin: 0.1, end: 0);
               },
-              childCount: properties.length,
             ),
-            gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-              crossAxisCount: 2,
-              crossAxisSpacing: 12,
-              mainAxisSpacing: 12,
-              childAspectRatio: 0.72,
-            ),
-          ),
+          ]),
         );
       },
+    );
+  }
+
+  Widget _buildSectionHeader(PropertyFilter filter, int? count) {
+    String badgeLabel;
+    if (count == null) {
+      badgeLabel = '—';
+    } else if (filter.hasActiveFilters) {
+      badgeLabel = '$count filtered';
+    } else {
+      badgeLabel = '$count total';
+    }
+
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(20, 24, 20, 12),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        children: [
+          Text(
+            'All Properties',
+            style: Theme.of(context).textTheme.headlineMedium,
+          ),
+          Container(
+            padding:
+                const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+            decoration: BoxDecoration(
+              color: AppTheme.primarySurface,
+              borderRadius:
+                  BorderRadius.circular(AppTheme.radiusFull),
+            ),
+            child: Text(
+              badgeLabel,
+              style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                    color: AppTheme.primary,
+                    fontWeight: FontWeight.w600,
+                  ),
+            ),
+          ),
+        ],
+      ),
     );
   }
 }
 
 // ─── Supporting Widgets ───────────────────────────────────────────────────────
+
+/// Shows a live count of active filters so the user always knows
+/// how many constraints are applied without opening the filter sheet.
+class _FilterCountBadge extends ConsumerWidget {
+  final PropertyFilter filter;
+  const _FilterCountBadge({required this.filter});
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    if (!filter.hasActiveFilters) return const SizedBox.shrink();
+
+    // Count individual active constraints.
+    // FIX 1: PropertyFilter has no `propertyTypes` field — use `type` (singular).
+    // FIX 2: `amenities` is List<PropertyAmenity> (non-nullable) — drop `?.`.
+    int count = 0;
+    if (filter.minPrice != null || filter.maxPrice != null) count++;
+    if (filter.minBedrooms != null) count++;
+    if (filter.type != null) count++;
+    if (filter.amenities.isNotEmpty) count++;
+
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+      decoration: BoxDecoration(
+        color: AppTheme.primary,
+        borderRadius: BorderRadius.circular(AppTheme.radiusFull),
+      ),
+      child: Text(
+        '$count filter${count == 1 ? '' : 's'}',
+        style: const TextStyle(
+          fontFamily: AppTheme.fontFamily,
+          fontSize: 12,
+          fontWeight: FontWeight.w600,
+          color: Colors.white,
+        ),
+      ),
+    );
+  }
+}
 
 class _ToggleButton extends StatelessWidget {
   final String label;
@@ -574,9 +654,11 @@ class _ToggleButton extends StatelessWidget {
       onTap: onTap,
       child: AnimatedContainer(
         duration: const Duration(milliseconds: 200),
-        padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 10),
+        padding:
+            const EdgeInsets.symmetric(horizontal: 24, vertical: 10),
         decoration: BoxDecoration(
-          color: isSelected ? AppTheme.primary : AppTheme.surfaceVariant,
+          color:
+              isSelected ? AppTheme.primary : AppTheme.surfaceVariant,
           borderRadius: BorderRadius.circular(AppTheme.radiusMD),
         ),
         child: Text(
@@ -615,8 +697,7 @@ class _FilterButton extends StatelessWidget {
               : AppTheme.surfaceVariant,
           borderRadius: BorderRadius.circular(AppTheme.radiusMD),
           border: Border.all(
-            color:
-                hasActiveFilters ? AppTheme.primary : AppTheme.border,
+            color: hasActiveFilters ? AppTheme.primary : AppTheme.border,
             width: 0.5,
           ),
         ),
@@ -650,7 +731,9 @@ class _FilterButton extends StatelessWidget {
   }
 }
 
-class FeaturedPropertyCard extends StatelessWidget {
+// ─── Featured Property Card ───────────────────────────────────────────────────
+
+class FeaturedPropertyCard extends ConsumerWidget {
   final Property property;
   final VoidCallback onTap;
 
@@ -661,7 +744,13 @@ class FeaturedPropertyCard extends StatelessWidget {
   });
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
+    final userAsync = ref.watch(currentUserProvider);
+    final isSaved =
+        userAsync.value?.savedProperties.contains(property.id) ?? false;
+
+    final isNew = DateTime.now().difference(property.createdAt).inDays <= 7;
+
     return GestureDetector(
       onTap: onTap,
       child: Container(
@@ -688,11 +777,8 @@ class FeaturedPropertyCard extends StatelessWidget {
                   ),
                   errorWidget: (_, __, ___) => Container(
                     color: AppTheme.surfaceVariant,
-                    child: const Icon(
-                      Icons.home_outlined,
-                      size: 48,
-                      color: AppTheme.textTertiary,
-                    ),
+                    child: const Icon(Icons.home_outlined,
+                        size: 48, color: AppTheme.textTertiary),
                   ),
                 ),
               ),
@@ -714,26 +800,50 @@ class FeaturedPropertyCard extends StatelessWidget {
                 ),
               ),
 
-              // Featured badge
+              // Top-left badges row
               Positioned(
                 top: 12,
                 left: 12,
-                child: Container(
-                  padding: const EdgeInsets.symmetric(
-                      horizontal: 10, vertical: 5),
-                  decoration: BoxDecoration(
-                    color: AppTheme.accent,
-                    borderRadius:
-                        BorderRadius.circular(AppTheme.radiusFull),
-                  ),
-                  child: const Text(
-                    'Featured',
-                    style: TextStyle(
-                      color: Colors.white,
-                      fontSize: 11,
-                      fontWeight: FontWeight.w600,
+                child: Row(
+                  children: [
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 10, vertical: 5),
+                      decoration: BoxDecoration(
+                        color: AppTheme.accent,
+                        borderRadius:
+                            BorderRadius.circular(AppTheme.radiusFull),
+                      ),
+                      child: const Text(
+                        'Featured',
+                        style: TextStyle(
+                          color: Colors.white,
+                          fontSize: 11,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
                     ),
-                  ),
+                    if (isNew) ...[
+                      const SizedBox(width: 6),
+                      Container(
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 8, vertical: 5),
+                        decoration: BoxDecoration(
+                          color: const Color(0xFF1D9E75),
+                          borderRadius:
+                              BorderRadius.circular(AppTheme.radiusFull),
+                        ),
+                        child: const Text(
+                          'New',
+                          style: TextStyle(
+                            color: Colors.white,
+                            fontSize: 11,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ],
                 ),
               ),
 
@@ -741,17 +851,27 @@ class FeaturedPropertyCard extends StatelessWidget {
               Positioned(
                 top: 8,
                 right: 8,
-                child: Container(
-                  width: 36,
-                  height: 36,
-                  decoration: BoxDecoration(
-                    color: Colors.white.withValues(alpha: 0.9),
-                    shape: BoxShape.circle,
-                  ),
-                  child: const Icon(
-                    Icons.favorite_border,
-                    size: 18,
-                    color: AppTheme.textSecondary,
+                child: GestureDetector(
+                  onTap: () async {
+                    final user = userAsync.value;
+                    if (user == null) return;
+                    await ref
+                        .read(propertyServiceProvider)
+                        .toggleSavedProperty(user.id, property.id);
+                    ref.invalidate(currentUserProvider);
+                  },
+                  child: Container(
+                    width: 36,
+                    height: 36,
+                    decoration: BoxDecoration(
+                      color: Colors.white.withValues(alpha: 0.9),
+                      shape: BoxShape.circle,
+                    ),
+                    child: Icon(
+                      isSaved ? Icons.favorite : Icons.favorite_border,
+                      size: 18,
+                      color: isSaved ? Colors.red : AppTheme.textSecondary,
+                    ),
                   ),
                 ),
               ),
@@ -796,10 +916,19 @@ class FeaturedPropertyCard extends StatelessWidget {
                             property.location.neighborhood ??
                                 property.location.city,
                             style: const TextStyle(
-                              color: Colors.white70,
-                              fontSize: 12,
-                            ),
+                                color: Colors.white70, fontSize: 12),
                           ),
+                          const Spacer(),
+                          if (property.bedrooms != null)
+                            _MiniStatPill(
+                                icon: Icons.bed_outlined,
+                                value: '${property.bedrooms}'),
+                          if (property.bathrooms != null) ...[
+                            const SizedBox(width: 4),
+                            _MiniStatPill(
+                                icon: Icons.bathtub_outlined,
+                                value: '${property.bathrooms}'),
+                          ],
                         ],
                       ),
                     ],
@@ -809,6 +938,34 @@ class FeaturedPropertyCard extends StatelessWidget {
             ],
           ),
         ),
+      ),
+    );
+  }
+}
+
+class _MiniStatPill extends StatelessWidget {
+  final IconData icon;
+  final String value;
+  const _MiniStatPill({required this.icon, required this.value});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
+      decoration: BoxDecoration(
+        color: Colors.black.withValues(alpha: 0.35),
+        borderRadius: BorderRadius.circular(AppTheme.radiusFull),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(icon, size: 10, color: Colors.white70),
+          const SizedBox(width: 3),
+          Text(
+            value,
+            style: const TextStyle(color: Colors.white, fontSize: 11),
+          ),
+        ],
       ),
     );
   }

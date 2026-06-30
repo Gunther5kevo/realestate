@@ -34,7 +34,11 @@ final _searchParamsProvider =
 // ─── Screen ───────────────────────────────────────────────────────────────────
 
 class SearchScreen extends ConsumerStatefulWidget {
-  const SearchScreen({super.key});
+  /// When set, the screen opens pre-filtered to this agent's listings.
+  /// Used by the "More listings by this agent" shortcut in PropertyDetailScreen.
+  final String? initialAgentId;
+
+  const SearchScreen({super.key, this.initialAgentId});
 
   @override
   ConsumerState<SearchScreen> createState() => _SearchScreenState();
@@ -49,16 +53,32 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
   @override
   void initState() {
     super.initState();
+
+    // Pre-seed the query with the agent ID so searchProperties can filter by it.
+    // We store it in _query (which feeds the search service) and also show it
+    // in the text field as a read-only hint via the controller.
+    if (widget.initialAgentId != null) {
+      _query = widget.initialAgentId!;
+      _searchController.text = '';        // keep text field blank — agent ID is
+                                          // not a human-readable search term
+      _filter = PropertyFilter(
+        searchQuery: widget.initialAgentId,
+      );
+    }
+
     _searchController.addListener(() {
       final text = _searchController.text;
       if (text != _query) {
         setState(() => _query = text);
       }
     });
-    // Request focus after the frame is fully built to avoid assertion errors
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (mounted) _focusNode.requestFocus();
-    });
+
+    // Only auto-focus the keyboard when there is no pre-seeded agent filter.
+    if (widget.initialAgentId == null) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) _focusNode.requestFocus();
+      });
+    }
   }
 
   @override
@@ -67,6 +87,9 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
     _focusNode.dispose();
     super.dispose();
   }
+
+  // True when we were opened from a "more listings by agent" tap.
+  bool get _isAgentView => widget.initialAgentId != null;
 
   @override
   Widget build(BuildContext context) {
@@ -80,7 +103,9 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
         children: [
           if (_filter.hasActiveFilters) _buildFilterChips(),
           Expanded(
-            child: _query.isEmpty && !_filter.hasActiveFilters
+            // When opened from an agent tap we skip the empty-search prompt
+            // and go straight to results (or loading/error).
+            child: (!_isAgentView && _query.isEmpty && !_filter.hasActiveFilters)
                 ? _buildEmptySearch()
                 : resultsAsync.when(
                     loading: () => _buildLoadingGrid(),
@@ -102,48 +127,54 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
       backgroundColor: AppTheme.surface,
       leading: IconButton(
         icon: const Icon(Icons.arrow_back),
-        // FIX: back from search could go to home (shell tab) or a non-shell
-        // screen. context.pop() is safe here — GoRouter pops to wherever
-        // we came from without creating new pages.
         onPressed: () => context.pop(),
       ),
-      title: TextField(
-        controller: _searchController,
-        focusNode: _focusNode,
-        style: Theme.of(context).textTheme.bodyLarge,
-        decoration: InputDecoration(
-          hintText: 'Search by location, property name...',
-          hintStyle: Theme.of(context).textTheme.bodyLarge?.copyWith(
-                color: AppTheme.textTertiary,
+      title: _isAgentView
+          // Agent-filter view: show a static title instead of a text field
+          ? Text(
+              'Agent Listings',
+              style: Theme.of(context).textTheme.titleLarge,
+            )
+          : TextField(
+              controller: _searchController,
+              focusNode: _focusNode,
+              style: Theme.of(context).textTheme.bodyLarge,
+              decoration: InputDecoration(
+                hintText: 'Search by location, property name...',
+                hintStyle:
+                    Theme.of(context).textTheme.bodyLarge?.copyWith(
+                          color: AppTheme.textTertiary,
+                        ),
+                border: InputBorder.none,
+                enabledBorder: InputBorder.none,
+                focusedBorder: InputBorder.none,
+                fillColor: Colors.transparent,
+                filled: false,
+                contentPadding: EdgeInsets.zero,
+                isDense: true,
+                suffixIcon: _query.isNotEmpty
+                    ? IconButton(
+                        icon: const Icon(Icons.clear, size: 18),
+                        onPressed: () {
+                          _searchController.clear();
+                          setState(() => _query = '');
+                        },
+                      )
+                    : null,
               ),
-          border: InputBorder.none,
-          enabledBorder: InputBorder.none,
-          focusedBorder: InputBorder.none,
-          fillColor: Colors.transparent,
-          filled: false,
-          contentPadding: EdgeInsets.zero,
-          isDense: true,
-          suffixIcon: _query.isNotEmpty
-              ? IconButton(
-                  icon: const Icon(Icons.clear, size: 18),
-                  onPressed: () {
-                    _searchController.clear();
-                    setState(() => _query = '');
-                  },
-                )
-              : null,
-        ),
-      ),
+            ),
       actions: [
-        IconButton(
-          icon: Icon(
-            Icons.tune_rounded,
-            color: _filter.hasActiveFilters
-                ? AppTheme.primary
-                : AppTheme.textSecondary,
+        // Hide the filter button in agent-view to keep the UX focused
+        if (!_isAgentView)
+          IconButton(
+            icon: Icon(
+              Icons.tune_rounded,
+              color: _filter.hasActiveFilters
+                  ? AppTheme.primary
+                  : AppTheme.textSecondary,
+            ),
+            onPressed: _showFilters,
           ),
-          onPressed: _showFilters,
-        ),
       ],
       bottom: PreferredSize(
         preferredSize: const Size.fromHeight(0.5),
@@ -174,8 +205,8 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
           if (_filter.type != null)
             _ActiveFilterChip(
               label: _filter.type!.displayLabel,
-              onRemove: () =>
-                  setState(() => _filter = _filter.copyWith(clearType: true)),
+              onRemove: () => setState(
+                  () => _filter = _filter.copyWith(clearType: true)),
             ),
           if (_filter.minPrice != null || _filter.maxPrice != null)
             _ActiveFilterChip(
@@ -211,7 +242,7 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
             Container(
               width: 80,
               height: 80,
-              decoration: BoxDecoration(
+              decoration: const BoxDecoration(
                 color: AppTheme.primarySurface,
                 shape: BoxShape.circle,
               ),
@@ -255,7 +286,9 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
             ),
             const SizedBox(height: 16),
             Text(
-              'No properties found',
+              _isAgentView
+                  ? 'No listings found for this agent'
+                  : 'No properties found',
               style: Theme.of(context)
                   .textTheme
                   .headlineSmall
@@ -263,13 +296,15 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
             ),
             const SizedBox(height: 8),
             Text(
-              'Try different keywords or adjust your filters',
+              _isAgentView
+                  ? 'This agent has no active listings at the moment'
+                  : 'Try different keywords or adjust your filters',
               style: Theme.of(context).textTheme.bodyMedium?.copyWith(
                     color: AppTheme.textTertiary,
                   ),
               textAlign: TextAlign.center,
             ),
-            if (_filter.hasActiveFilters) ...[
+            if (!_isAgentView && _filter.hasActiveFilters) ...[
               const SizedBox(height: 20),
               TextButton(
                 onPressed: () =>
@@ -336,7 +371,6 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
   Widget _buildResults(List<Property> properties) {
     return Column(
       children: [
-        // Result count + map toggle
         Container(
           color: AppTheme.surface,
           padding: const EdgeInsets.fromLTRB(16, 10, 8, 10),
@@ -349,19 +383,19 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
                     ),
               ),
               const Spacer(),
-              TextButton.icon(
-                icon: const Icon(Icons.map_outlined, size: 16),
-                label: const Text('Map view'),
-                // /map is not a shell tab — push() is correct
-                onPressed: () => context.push('/map'),
-                style: TextButton.styleFrom(
-                  foregroundColor: AppTheme.primary,
-                  textStyle: const TextStyle(
-                    fontSize: 13,
-                    fontWeight: FontWeight.w500,
+              if (!_isAgentView)
+                TextButton.icon(
+                  icon: const Icon(Icons.map_outlined, size: 16),
+                  label: const Text('Map view'),
+                  onPressed: () => context.push('/map'),
+                  style: TextButton.styleFrom(
+                    foregroundColor: AppTheme.primary,
+                    textStyle: const TextStyle(
+                      fontSize: 13,
+                      fontWeight: FontWeight.w500,
+                    ),
                   ),
                 ),
-              ),
             ],
           ),
         ),
@@ -378,7 +412,6 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
             itemCount: properties.length,
             itemBuilder: (context, i) => PropertyCard(
               property: properties[i],
-              // /property/:id is not a shell tab — push() is correct
               onTap: () => context.push('/property/${properties[i].id}'),
             ),
           ),

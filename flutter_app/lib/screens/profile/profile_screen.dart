@@ -39,101 +39,101 @@ class _ProfileBody extends ConsumerWidget {
   final AppUser user;
   const _ProfileBody({required this.user});
 
-  @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    final isAgent = user.role == UserRole.agent;
+@override
+Widget build(BuildContext context, WidgetRef ref) {
+  final isAgent = user.role == UserRole.agent;
 
-    return CustomScrollView(
-      slivers: [
-        // ── Header sliver
-        SliverToBoxAdapter(child: _buildHeader(context, ref, isAgent)),
+  return CustomScrollView(
+    slivers: [
+      // ── Header sliver
+      SliverToBoxAdapter(child: _buildHeader(context, ref, isAgent)),
 
-        // ── Agent stats row
-        if (isAgent)
-          SliverToBoxAdapter(child: _buildAgentStats(context, ref)),
+      // ── Agent stats row
+      if (isAgent)
+        SliverToBoxAdapter(child: _buildAgentStats(context, ref)),
 
-        // ── Agent tools section
-        if (isAgent) ...[
-          SliverToBoxAdapter(child: const SizedBox(height: 12)),
-          SliverToBoxAdapter(
-            child: _Section(
-              title: 'Agent Tools',
-              children: [
-                _MenuItem(
-                  icon: Icons.add_home_outlined,
-                  label: 'Add New Listing',
-                  onTap: () => context.push('/add-listing'),
-                ),
-                _MenuItem(
-                  icon: Icons.list_alt_outlined,
-                  label: 'My Listings',
-                  onTap: () => context.push('/agent/${user.id}/listings'),
-                ),
-                _MenuItem(
-                  icon: Icons.calendar_today_outlined,
-                  label: 'Booking Requests',
-                  onTap: () => context.go('/bookings'),
-                ),
-              ],
-            ),
-          ),
-        ],
-
-        // ── Account section
+      // ── Agent tools section
+      if (isAgent) ...[
         SliverToBoxAdapter(child: const SizedBox(height: 12)),
         SliverToBoxAdapter(
           child: _Section(
-            title: 'Account',
+            title: 'Agent Tools',
             children: [
               _MenuItem(
-                icon: Icons.favorite_outline,
-                label: 'Saved Properties',
-                badge: user.savedProperties.isNotEmpty
-                    ? '${user.savedProperties.length}'
-                    : null,
-                onTap: () => context.go('/saved'),
+                icon: Icons.add_home_outlined,
+                label: 'Add New Listing',
+                onTap: () => context.push('/add-listing'),
               ),
               _MenuItem(
-                icon: Icons.receipt_long_outlined,
-                label: 'Transactions',
-                onTap: () => context.push('/transactions'),
+                icon: Icons.list_alt_outlined,
+                label: 'My Listings',
+                onTap: () => context.push('/agent/${user.id}/listings'),
               ),
               _MenuItem(
-                icon: Icons.notifications_outlined,
-                label: 'Notifications',
-                onTap: () => context.push('/notifications'),
-              ),
-              _MenuItem(
-                icon: Icons.help_outline,
-                label: 'Help & Support',
-                onTap: () {},
+                icon: Icons.calendar_today_outlined,
+                label: 'Booking Requests',
+                onTap: () => context.go('/bookings'),
               ),
             ],
           ),
         ),
-
-        // ── Sign out section
-        SliverToBoxAdapter(child: const SizedBox(height: 12)),
-        SliverToBoxAdapter(
-          child: _Section(
-            title: '',
-            children: [
-              _MenuItem(
-                icon: Icons.logout,
-                label: 'Sign Out',
-                textColor: AppTheme.error,
-                iconColor: AppTheme.error,
-                showChevron: false,
-                onTap: () => _showSignOutDialog(context, ref),
-              ),
-            ],
-          ),
-        ),
-
-        const SliverToBoxAdapter(child: SizedBox(height: 40)),
       ],
-    );
-  }
+
+      // ── Account section
+      SliverToBoxAdapter(child: const SizedBox(height: 12)),
+      SliverToBoxAdapter(
+        child: _Section(
+          title: 'Account',
+          children: [
+            _MenuItem(
+              icon: Icons.favorite_outline,
+              label: 'Saved Properties',
+              badge: user.savedProperties.isNotEmpty
+                  ? '${user.savedProperties.length}'
+                  : null,
+              onTap: () => context.go('/saved'),
+            ),
+            _MenuItem(
+              icon: Icons.receipt_long_outlined,
+              label: 'Transactions',
+              onTap: () => context.push('/transactions'),
+            ),
+            _MenuItem(
+              icon: Icons.notifications_outlined,
+              label: 'Notifications',
+              onTap: () => context.push('/notifications'),
+            ),
+            _MenuItem(
+              icon: Icons.help_outline,
+              label: 'Help & Support',
+              onTap: () => context.push('/help-support'),
+            ),
+          ],
+        ),
+      ),
+
+      // ── Sign out section
+      SliverToBoxAdapter(child: const SizedBox(height: 12)),
+      SliverToBoxAdapter(
+        child: _Section(
+          title: '',
+          children: [
+            _MenuItem(
+              icon: Icons.logout,
+              label: 'Sign Out',
+              textColor: AppTheme.error,
+              iconColor: AppTheme.error,
+              showChevron: false,
+              onTap: () => _showSignOutDialog(context, ref),
+            ),
+          ],
+        ),
+      ),
+
+      const SliverToBoxAdapter(child: SizedBox(height: 40)),
+    ],
+  );
+}
 
   Widget _buildHeader(BuildContext context, WidgetRef ref, bool isAgent) {
     return Container(
